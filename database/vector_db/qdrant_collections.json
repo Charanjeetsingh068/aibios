@@ -1,0 +1,32 @@
+{
+  "collections": [
+    {
+      "name": "agent_knowledge_base",
+      "vector_config": {
+        "size": 1536,
+        "distance": "Cosine"
+      },
+      "optimizers_config": {
+        "default_segment_number": 2
+      },
+      "hnsw_config": {
+        "m": 16,
+        "ef_construct": 100
+      }
+    },
+    {
+      "name": "episodic_memory",
+      "vector_config": {
+        "size": 1536,
+        "distance": "Cosine"
+      },
+      "optimizers_config": {
+        "default_segment_number": 1
+      },
+      "hnsw_config": {
+        "m": 8,
+        "ef_construct": 64
+      }
+    }
+  ]
+}

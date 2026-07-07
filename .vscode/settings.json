@@ -1,0 +1,17 @@
+{
+  "editor.formatOnSave": true,
+  "editor.defaultFormatter": "esbenp.prettier-vscode",
+  "python.defaultInterpreterPath": "${workspaceFolder}/backend/venv/Scripts/python",
+  "python.linting.enabled": true,
+  "python.linting.ruffEnabled": true,
+  "python.formatting.provider": "black",
+  "search.exclude": {
+    "**/node_modules": true,
+    "**/venv": true,
+    "**/.next": true
+  },
+  "files.exclude": {
+    "**/__pycache__": true,
+    "**/*.pyc": true
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "name": "aibios-enterprise",
+  "version": "1.0.0",
+  "description": "AI-BOS (AI Business Operating System) Enterprise Edition Foundation",
+  "private": true,
+  "scripts": {
+    "setup": "powershell -ExecutionPolicy Bypass -File ./setup.ps1",
+    "setup:bash": "bash ./setup.sh",
+    "dev:backend": "cd backend && venv\\Scripts\\python -m uvicorn app.main:app --reload --port 8000",
+    "dev:frontend": "cd frontend && npm run dev",
+    "all": "node scripts/run-all.js",
+    "verify": "python ./scripts/verify.py"
+  },
+  "workspaces": [
+    "frontend",
+    "mobile"
+  ],
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "author": "AI-BOS Architect",
+  "license": "UNLICENSED"
+}
