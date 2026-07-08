@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 from typing import List, Optional
-from sqlalchemy import String, Boolean, DateTime, ForeignKey, Table, Column
+from sqlalchemy import String, Boolean, DateTime, ForeignKey, Table, Column, Integer
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
@@ -27,6 +27,16 @@ class Organization(Base):
     name: Mapped[str] = mapped_column(String(100), nullable=False)
     slug: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
     status: Mapped[str] = mapped_column(String(20), default="active")
+    logo_char: Mapped[Optional[str]] = mapped_column(String(10), default="Ω", nullable=True)
+    gst_number: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    address: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    timezone: Mapped[Optional[str]] = mapped_column(String(100), default="Asia/Kolkata", nullable=True)
+    brand_color: Mapped[Optional[str]] = mapped_column(String(10), default="#3b82f6", nullable=True)
+    subscription_plan: Mapped[Optional[str]] = mapped_column(String(30), default="enterprise", nullable=True)
+    smtp_host: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    smtp_port: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    smtp_user: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    smtp_pass: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 

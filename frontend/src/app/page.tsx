@@ -31,6 +31,11 @@ import { fetchLeads, createLead as apiCreateLead, updateLead as apiUpdateLead, d
 import { fetchDeals, createDeal as apiCreateDeal, updateDeal as apiUpdateDeal, Deal } from '../services/dealsService';
 import { fetchIntegrations, connectIntegration as apiConnectIntegration } from '../services/integrationsService';
 import { useRealtimeSocket } from '../hooks/useRealtimeSocket';
+import { fetchWorkflows, createWorkflow as apiCreateWorkflow, updateWorkflow as apiUpdateWorkflow, deleteWorkflow as apiDeleteWorkflow, runWorkflow as apiRunWorkflow } from '../services/workflowService';
+import { fetchKbArticles, createKbArticle as apiCreateKbArticle, deleteKbArticle as apiDeleteKbArticle, searchKbArticles as apiSearchKbArticles } from '../services/kbService';
+import { fetchDocuments, uploadDocument as apiUploadDocument, deleteDocument as apiDeleteDocument } from '../services/documentService';
+import { fetchCallLogs, fetchCallTranscript as apiFetchCallTranscript } from '../services/voiceService';
+import { fetchInvoices, triggerCheckout as apiTriggerCheckout } from '../services/billingService';
 
 // ─── Nav Config ────────────────────────────────────────────────────────────────
 
@@ -112,22 +117,6 @@ const AI_AGENTS_CONFIG = [
   { id: 'knowledge', name: 'Knowledge AI', type: 'Retrieval', icon: BookOpen, desc: 'Performs semantic search across documents and knowledge base.' },
   { id: 'developer', name: 'Developer AI', type: 'Tooling', icon: Code, desc: 'Generates code, writes tests and deploys automation scripts.' },
   { id: 'automation', name: 'Automation AI', type: 'Workflows', icon: Zap, desc: 'Executes multi-step automation workflows triggered by events.' },
-];
-
-const AUTOMATION_WORKFLOWS = [
-  { id: 'wf-01', name: 'New Lead → AI Qualification Call', trigger: 'Lead Created', status: 'active', runs: 128 },
-  { id: 'wf-02', name: 'Facebook Lead → WhatsApp Welcome', trigger: 'FB Webhook', status: 'active', runs: 94 },
-  { id: 'wf-03', name: 'Meeting Scheduled → CRM Update', trigger: 'Calendar Event', status: 'active', runs: 47 },
-  { id: 'wf-04', name: 'Deal Won → Invoice Generation', trigger: 'Pipeline Stage', status: 'paused', runs: 22 },
-  { id: 'wf-05', name: 'Inactivity 7d → Follow-up SMS', trigger: 'Scheduler (daily)', status: 'active', runs: 310 },
-];
-
-const KB_ARTICLES = [
-  { id: 'kb-01', title: 'Getting Started with AI-BOS', category: 'Onboarding', views: 1420, updated: '2026-07-01' },
-  { id: 'kb-02', title: 'Configuring Lead Capture Webhooks', category: 'Integrations', views: 892, updated: '2026-07-03' },
-  { id: 'kb-03', title: 'RBAC Roles & Permission Guide', category: 'Security', views: 764, updated: '2026-07-04' },
-  { id: 'kb-04', title: 'AI Voice Agent Setup', category: 'AI Platform', views: 1103, updated: '2026-07-05' },
-  { id: 'kb-05', title: 'WhatsApp Integration Manual', category: 'Channels', views: 678, updated: '2026-07-06' },
 ];
 
 function getRoleBadgeStyle(role: string): React.CSSProperties {
@@ -227,6 +216,16 @@ export default function Dashboard() {
   const [newMeetingTitle, setNewMeetingTitle] = useState('');
   const [newMeetingTime, setNewMeetingTime] = useState('');
 
+  // ── Workflows ──
+  const [showAddWorkflow, setShowAddWorkflow] = useState(false);
+  const [newWfName, setNewWfName] = useState('');
+  const [newWfTrigger, setNewWfTrigger] = useState('Lead Created');
+
+  // ── Knowledge Base ──
+  const [showAddKb, setShowAddKb] = useState(false);
+  const [newKbTitle, setNewKbTitle] = useState('');
+  const [newKbCategory, setNewKbCategory] = useState('General');
+
   // ── Real backend data (React Query) ──
   const overviewQuery = useQuery({ queryKey: ['overview'], queryFn: fetchDashboardOverview, refetchInterval: 30000 });
   const overview = overviewQuery.data;
@@ -251,6 +250,36 @@ export default function Dashboard() {
 
   const integrationsQuery = useQuery({ queryKey: ['integrations'], queryFn: fetchIntegrations });
   const integrations = integrationsQuery.data?.integrations ?? [];
+
+  // Workflows React Query
+  const workflowsQuery = useQuery({ queryKey: ['workflows'], queryFn: fetchWorkflows });
+  const workflows = workflowsQuery.data?.workflows ?? [];
+
+  // KB Articles React Query
+  const [kbSearchText, setKbSearchText] = useState('');
+  const kbQuery = useQuery({ queryKey: ['kb'], queryFn: fetchKbArticles });
+  const kbSearchQuery = useQuery({
+    queryKey: ['kb-search', kbSearchText],
+    queryFn: () => apiSearchKbArticles(kbSearchText),
+    enabled: !!kbSearchText
+  });
+  const kbArticles = kbSearchText ? (kbSearchQuery.data?.results ?? []) : (kbQuery.data?.articles ?? []);
+
+  // Documents React Query
+  const documentsQuery = useQuery({ queryKey: ['documents'], queryFn: fetchDocuments });
+  const documents = documentsQuery.data?.documents ?? [];
+
+  // Voice Calls React Query
+  const voiceQuery = useQuery({ queryKey: ['calls'], queryFn: fetchCallLogs });
+  const voiceCalls = voiceQuery.data?.calls ?? [];
+
+  // Billing Invoices React Query
+  const invoicesQuery = useQuery({ queryKey: ['invoices'], queryFn: fetchInvoices });
+  const invoices = invoicesQuery.data?.invoices ?? [];
+
+  // Expanded voice call transcript
+  const [expandedCallId, setExpandedCallId] = useState<string | null>(null);
+  const [callTranscript, setCallTranscript] = useState<string>('');
 
   // ── Mutations ──
   const invalidate = (key: string) => queryClient.invalidateQueries({ queryKey: [key] });
@@ -307,6 +336,50 @@ export default function Dashboard() {
     mutationFn: apiConnectIntegration,
     onError: (err: any) => pushNotification(err?.message || 'Failed to connect integration'),
     onSuccess: () => invalidate('integrations'),
+  });
+
+  const createWorkflowMutation = useMutation({
+    mutationFn: apiCreateWorkflow,
+    onSuccess: () => { invalidate('workflows'); },
+  });
+  const updateWorkflowMutation = useMutation({
+    mutationFn: ({ id, data }: { id: string; data: any }) => apiUpdateWorkflow(id, data),
+    onSuccess: () => invalidate('workflows'),
+  });
+  const deleteWorkflowMutation = useMutation({
+    mutationFn: apiDeleteWorkflow,
+    onSuccess: () => invalidate('workflows'),
+  });
+  const runWorkflowMutation = useMutation({
+    mutationFn: apiRunWorkflow,
+    onSuccess: () => { invalidate('workflows'); invalidate('overview'); },
+  });
+
+  const createKbMutation = useMutation({
+    mutationFn: apiCreateKbArticle,
+    onSuccess: () => invalidate('kb'),
+  });
+  const deleteKbMutation = useMutation({
+    mutationFn: apiDeleteKbArticle,
+    onSuccess: () => invalidate('kb'),
+  });
+
+  const uploadDocMutation = useMutation({
+    mutationFn: apiUploadDocument,
+    onSuccess: () => invalidate('documents'),
+  });
+  const deleteDocMutation = useMutation({
+    mutationFn: apiDeleteDocument,
+    onSuccess: () => invalidate('documents'),
+  });
+
+  const checkoutMutation = useMutation({
+    mutationFn: ({ planId, gateway }: { planId: string; gateway: 'stripe' | 'razorpay' }) => apiTriggerCheckout(planId, gateway),
+    onSuccess: (res) => {
+      if (res.checkout_url) {
+        window.open(res.checkout_url, '_blank');
+      }
+    },
   });
 
   // ── Real-time socket: updates cached query data + notification feed instantly ──
@@ -405,6 +478,33 @@ export default function Dashboard() {
   const markAllRead = () => setNotifications(prev => prev.map(n => ({ ...n, unread: false })));
   const dismissNotif = (id: string | number) => setNotifications(prev => prev.filter(n => n.id !== id));
   const toggleCampaign = (id: string) => toggleCampaignMutation.mutate(id);
+
+  const handleDownloadReport = (reportType: string) => {
+    const token = localStorage.getItem('aibos_access_token');
+    const baseUrl = 'http://localhost:8000/api/v1';
+    window.open(`${baseUrl}/reports/${reportType}/download?format=csv&token=${token}`, '_blank');
+  };
+
+  const toggleWorkflow = (id: string, currentStatus: string) => {
+    const nextStatus = currentStatus === 'active' ? 'paused' : 'active';
+    updateWorkflowMutation.mutate({ id, data: { status: nextStatus } });
+  };
+
+  const toggleCallExpand = async (callId: string) => {
+    if (expandedCallId === callId) {
+      setExpandedCallId(null);
+      setCallTranscript('');
+    } else {
+      setExpandedCallId(callId);
+      setCallTranscript('Loading transcript...');
+      try {
+        const res = await apiFetchCallTranscript(callId);
+        setCallTranscript(res.transcript);
+      } catch {
+        setCallTranscript('Failed to retrieve call transcript from backend.');
+      }
+    }
+  };
 
   const addLead = (e: React.FormEvent) => {
     e.preventDefault();
@@ -1206,15 +1306,22 @@ export default function Dashboard() {
   // ─── Tab: AI Voice ────────────────────────────────────────────────────────
   const renderAiVoice = () => {
     const voiceIntegration = integrations.find(i => i.channel === 'ai_voice');
+    const isConnected = voiceIntegration?.status === 'connected';
+
     return (
     <>
       <div className="module-header">
         <div className="module-title"><h2>AI Voice Calls</h2><span>Outbound and inbound AI voice agents (OpenAI Realtime / Twilio / ElevenLabs)</span></div>
+        {!isConnected && (
+          <button className="btn-primary" onClick={() => connectChannel('ai_voice')} disabled={connectIntegrationMutation.isPending}>
+            <PhoneCall size={14} /> Connect Voice Provider
+          </button>
+        )}
       </div>
 
       <div className="module-stats-row" style={{ gridTemplateColumns: 'repeat(2,1fr)' }}>
         {[
-          { label: "Today's Calls", num: overview?.todayCalls ?? 0, color: 'var(--brand)' },
+          { label: "Today's Calls", num: voiceCalls.length, color: 'var(--brand)' },
           { label: 'Provider Status', num: voiceIntegration?.status.replace('_', ' ') ?? 'unknown', color: 'var(--warning)' },
         ].map(s => (
           <div key={s.label} className="module-stat-item">
@@ -1224,20 +1331,71 @@ export default function Dashboard() {
         ))}
       </div>
 
-      <div className="card">
-        <div className="empty-state">
-          <PhoneCall size={40} className="empty-state-icon" />
-          <p className="empty-state-title">No AI voice provider connected</p>
-          <p className="empty-state-desc">
-            {voiceIntegration?.status === 'not_configured'
-              ? `Set one provider's credentials on the backend to enable AI calling: ${voiceIntegration.missing_configuration.join('; ')}`
-              : 'Configure an AI voice provider to enable automatic outbound qualification calls.'}
-          </p>
-          <button className="btn-primary" style={{ marginTop: 8 }} onClick={() => connectChannel('ai_voice')} disabled={connectIntegrationMutation.isPending}>
-            <PhoneCall size={14} /> Connect Voice Provider
-          </button>
+      {isConnected ? (
+        <div className="card">
+          <div className="data-table-wrapper">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>Lead Name</th>
+                  <th>Direction</th>
+                  <th>Duration</th>
+                  <th>Transcript Preview</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {voiceCalls.map(call => (
+                  <Fragment key={call.id}>
+                    <tr>
+                      <td><strong>{call.lead_name}</strong></td>
+                      <td><span className="role-badge" style={{ textTransform: 'capitalize' }}>{call.direction}</span></td>
+                      <td>{call.duration_seconds}s</td>
+                      <td style={{ fontSize: 'var(--font-xs)', color: 'var(--text-secondary)' }}>{call.transcript_preview}</td>
+                      <td>
+                        <button className="btn-secondary" style={{ fontSize: 11, padding: '4px 8px' }} onClick={() => toggleCallExpand(call.id)}>
+                          {expandedCallId === call.id ? 'Hide' : 'Transcript'}
+                        </button>
+                      </td>
+                    </tr>
+                    {expandedCallId === call.id && (
+                      <tr>
+                        <td colSpan={5} style={{ background: 'var(--bg-tertiary)', padding: 'var(--space-4)' }}>
+                          <div style={{ whiteSpace: 'pre-wrap', fontFamily: 'var(--font-mono)', fontSize: 'var(--font-xs)', color: 'var(--text-primary)' }}>
+                            {callTranscript}
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                  </Fragment>
+                ))}
+                {voiceCalls.length === 0 && (
+                  <tr>
+                    <td colSpan={5} style={{ textAlign: 'center', padding: 24, color: 'var(--text-tertiary)' }}>
+                      No calls recorded yet.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
         </div>
-      </div>
+      ) : (
+        <div className="card">
+          <div className="empty-state">
+            <PhoneCall size={40} className="empty-state-icon" />
+            <p className="empty-state-title">No AI voice provider connected</p>
+            <p className="empty-state-desc">
+              {voiceIntegration?.status === 'not_configured'
+                ? `Set one provider's credentials on the backend to enable AI calling: ${voiceIntegration.missing_configuration.join('; ')}`
+                : 'Configure an AI voice provider to enable automatic outbound qualification calls.'}
+            </p>
+            <button className="btn-primary" style={{ marginTop: 8 }} onClick={() => connectChannel('ai_voice')} disabled={connectIntegrationMutation.isPending}>
+              <PhoneCall size={14} /> Connect Voice Provider
+            </button>
+          </div>
+        </div>
+      )}
     </>
     );
   };
@@ -1308,61 +1466,207 @@ workflow.add_conditional_edges(
   );
 
   // ─── Tab: Automation ──────────────────────────────────────────────────────
-  const renderAutomation = () => (
-    <>
-      <div className="module-header">
-        <div className="module-title"><h2>Automation Workflows</h2><span>Event-driven pipelines executed by AI agents</span></div>
-        <button className="btn-primary"><Plus size={14} /> New Workflow</button>
-      </div>
+  const renderAutomation = () => {
+    const handleCreateWorkflow = (e: React.FormEvent) => {
+      e.preventDefault();
+      if (!newWfName.trim()) return;
+      createWorkflowMutation.mutate({
+        name: newWfName.trim(),
+        trigger: newWfTrigger,
+        status: 'active',
+      });
+      setNewWfName('');
+      setShowAddWorkflow(false);
+    };
 
-      <div className="data-table-wrapper">
-        <table className="data-table">
-          <thead><tr><th>Workflow</th><th>Trigger</th><th>Status</th><th>Total Runs</th><th>Actions</th></tr></thead>
-          <tbody>
-            {AUTOMATION_WORKFLOWS.map(wf => (
-              <tr key={wf.id}>
-                <td><strong>{wf.name}</strong></td>
-                <td><span style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--font-xs)', color: 'var(--text-secondary)' }}>{wf.trigger}</span></td>
-                <td><span className={`status-badge ${wf.status}`}>{wf.status}</span></td>
-                <td>{wf.runs.toLocaleString()}</td>
-                <td><div style={{ display: 'flex', gap: 8 }}>
-                  <button className="task-delete-btn" style={{ color: 'var(--brand)' }}><Edit2 size={14} /></button>
-                  <button className="task-delete-btn" style={{ color: 'var(--danger)' }}><Trash2 size={14} /></button>
-                </div></td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </>
-  );
+    return (
+      <>
+        <div className="module-header">
+          <div className="module-title"><h2>Automation Workflows</h2><span>Event-driven pipelines executed by AI agents</span></div>
+          <button className="btn-primary" onClick={() => setShowAddWorkflow(p => !p)}>
+            <Plus size={14} /> {showAddWorkflow ? 'Cancel' : 'New Workflow'}
+          </button>
+        </div>
+
+        {showAddWorkflow && (
+          <div className="card" style={{ marginBottom: 'var(--space-4)' }}>
+            <form onSubmit={handleCreateWorkflow} style={{ display: 'flex', gap: 8 }}>
+              <input
+                required
+                placeholder="Workflow name (e.g. New Lead -> Welcome SMS)"
+                className="task-input-field"
+                style={{ flexGrow: 2 }}
+                value={newWfName}
+                onChange={e => setNewWfName(e.target.value)}
+              />
+              <select
+                className="task-input-field"
+                style={{ flexGrow: 1 }}
+                value={newWfTrigger}
+                onChange={e => setNewWfTrigger(e.target.value)}
+              >
+                <option value="Lead Created">Lead Created</option>
+                <option value="FB Webhook">FB Webhook</option>
+                <option value="Calendar Event">Calendar Event</option>
+                <option value="Pipeline Stage">Pipeline Stage</option>
+                <option value="Scheduler (daily)">Scheduler (daily)</option>
+              </select>
+              <button type="submit" className="btn-primary">Create</button>
+            </form>
+          </div>
+        )}
+
+        <div className="data-table-wrapper">
+          <table className="data-table">
+            <thead><tr><th>Workflow</th><th>Trigger</th><th>Status</th><th>Total Runs</th><th>Actions</th></tr></thead>
+            <tbody>
+              {workflows.map(wf => (
+                <tr key={wf.id}>
+                  <td><strong>{wf.name}</strong></td>
+                  <td><span style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--font-xs)', color: 'var(--text-secondary)' }}>{wf.trigger}</span></td>
+                  <td>
+                    <span
+                      onClick={() => toggleWorkflow(wf.id, wf.status)}
+                      className={`status-badge ${wf.status}`}
+                      style={{ cursor: 'pointer' }}
+                      title="Click to toggle status"
+                    >
+                      {wf.status}
+                    </span>
+                  </td>
+                  <td>{wf.runs.toLocaleString()}</td>
+                  <td>
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      <button
+                        className="btn-primary"
+                        style={{ fontSize: 10, padding: '3px 8px' }}
+                        onClick={() => runWorkflowMutation.mutate(wf.id)}
+                        disabled={runWorkflowMutation.isPending}
+                      >
+                        Run
+                      </button>
+                      <button
+                        className="task-delete-btn"
+                        style={{ color: 'var(--danger)' }}
+                        onClick={() => deleteWorkflowMutation.mutate(wf.id)}
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+              {workflows.length === 0 && (
+                <tr>
+                  <td colSpan={5} style={{ textAlign: 'center', padding: 24, color: 'var(--text-tertiary)' }}>
+                    No workflows created yet.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </>
+    );
+  };
 
   // ─── Tab: Knowledge Base ──────────────────────────────────────────────────
-  const renderKnowledgeBase = () => (
-    <>
-      <div className="module-header">
-        <div className="module-title"><h2>Knowledge Base</h2><span>Semantic search-indexed documentation and articles</span></div>
-        <button className="btn-primary"><Plus size={14} /> New Article</button>
-      </div>
+  const renderKnowledgeBase = () => {
+    const handleCreateArticle = (e: React.FormEvent) => {
+      e.preventDefault();
+      if (!newKbTitle.trim()) return;
+      createKbMutation.mutate({
+        title: newKbTitle.trim(),
+        category: newKbCategory,
+      });
+      setNewKbTitle('');
+      setShowAddKb(false);
+    };
 
-      <div className="data-table-wrapper">
-        <table className="data-table">
-          <thead><tr><th>Title</th><th>Category</th><th>Views</th><th>Last Updated</th><th>Actions</th></tr></thead>
-          <tbody>
-            {KB_ARTICLES.map(a => (
-              <tr key={a.id}>
-                <td><strong>{a.title}</strong></td>
-                <td><span className="perm-chip">{a.category}</span></td>
-                <td>{a.views.toLocaleString()}</td>
-                <td style={{ fontSize: 'var(--font-xs)', color: 'var(--text-tertiary)' }}>{a.updated}</td>
-                <td><button className="task-delete-btn" style={{ color: 'var(--brand)' }}><ChevronRight size={14} /></button></td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </>
-  );
+    return (
+      <>
+        <div className="module-header">
+          <div className="module-title"><h2>Knowledge Base</h2><span>Semantic search-indexed documentation and articles</span></div>
+          <button className="btn-primary" onClick={() => setShowAddKb(p => !p)}>
+            <Plus size={14} /> {showAddKb ? 'Cancel' : 'New Article'}
+          </button>
+        </div>
+
+        <div className="card" style={{ marginBottom: 'var(--space-4)', padding: 'var(--space-4)' }}>
+          <div className="search-input-wrapper" style={{ width: '100%' }}>
+            <Search size={14} className="search-input-icon" />
+            <input
+              className="search-input"
+              placeholder="Search knowledge base semantically (Qdrant indexed)..."
+              value={kbSearchText}
+              onChange={e => setKbSearchText(e.target.value)}
+              style={{ width: '100%' }}
+            />
+          </div>
+        </div>
+
+        {showAddKb && (
+          <div className="card" style={{ marginBottom: 'var(--space-4)' }}>
+            <form onSubmit={handleCreateArticle} style={{ display: 'flex', gap: 8 }}>
+              <input
+                required
+                placeholder="Article title"
+                className="task-input-field"
+                style={{ flexGrow: 2 }}
+                value={newKbTitle}
+                onChange={e => setNewKbTitle(e.target.value)}
+              />
+              <select
+                className="task-input-field"
+                style={{ flexGrow: 1 }}
+                value={newKbCategory}
+                onChange={e => setNewKbCategory(e.target.value)}
+              >
+                <option value="Onboarding">Onboarding</option>
+                <option value="Integrations">Integrations</option>
+                <option value="Security">Security</option>
+                <option value="AI Platform">AI Platform</option>
+                <option value="Channels">Channels</option>
+                <option value="General">General</option>
+              </select>
+              <button type="submit" className="btn-primary">Create</button>
+            </form>
+          </div>
+        )}
+
+        <div className="data-table-wrapper">
+          <table className="data-table">
+            <thead><tr><th>Title</th><th>Category</th><th>Views</th><th>Actions</th></tr></thead>
+            <tbody>
+              {kbArticles.map(a => (
+                <tr key={a.id}>
+                  <td><strong>{a.title}</strong></td>
+                  <td><span className="perm-chip">{a.category}</span></td>
+                  <td>{a.views.toLocaleString()}</td>
+                  <td>
+                    <button
+                      className="task-delete-btn"
+                      style={{ color: 'var(--danger)' }}
+                      onClick={() => deleteKbMutation.mutate(a.id)}
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  </td>
+                </tr>
+              ))}
+              {kbArticles.length === 0 && (
+                <tr>
+                  <td colSpan={4} style={{ textAlign: 'center', padding: 24, color: 'var(--text-tertiary)' }}>
+                    No matching articles found.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </>
+    );
+  };
 
   // ─── Tab: Organizations ───────────────────────────────────────────────────
   const renderOrganizations = () => (
@@ -1557,12 +1861,28 @@ workflow.add_conditional_edges(
         <div className="card">
           <h3 style={{ marginBottom: 'var(--space-4)' }}>Current Plan</h3>
           <div className="billing-plan-card current">
-            <div className="billing-plan-name">Enterprise</div>
+            <div className="billing-plan-name">Enterprise Plan</div>
             <div className="billing-plan-price">$499<span>/month</span></div>
             <div className="billing-plan-features">
               {['Unlimited AI agent nodes', 'Unlimited leads', 'All CRM modules', 'WhatsApp + FB + IG', 'Priority SLA support', 'Custom domain', 'Dedicated success manager'].map(f => (
                 <div key={f} className="billing-plan-feature"><Check size={14} style={{ color: 'var(--success)' }} />{f}</div>
               ))}
+            </div>
+            <div style={{ marginTop: 'var(--space-4)', display: 'flex', gap: 12 }}>
+              <button
+                className="btn-primary"
+                onClick={() => checkoutMutation.mutate({ planId: 'enterprise', gateway: 'stripe' })}
+                disabled={checkoutMutation.isPending}
+              >
+                Pay via Stripe
+              </button>
+              <button
+                className="btn-secondary"
+                onClick={() => checkoutMutation.mutate({ planId: 'enterprise', gateway: 'razorpay' })}
+                disabled={checkoutMutation.isPending}
+              >
+                Pay via Razorpay
+              </button>
             </div>
           </div>
         </div>
@@ -1588,6 +1908,45 @@ workflow.add_conditional_edges(
               </div>
             );
           })}
+        </div>
+      </div>
+
+      <div className="card" style={{ marginTop: 'var(--space-6)' }}>
+        <h3 style={{ marginBottom: 'var(--space-4)' }}>Billing & Invoice History</h3>
+        <div className="data-table-wrapper">
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>Invoice ID</th>
+                <th>Amount</th>
+                <th>Plan</th>
+                <th>Gateway</th>
+                <th>Status</th>
+                <th>Date</th>
+              </tr>
+            </thead>
+            <tbody>
+              {invoices.map(inv => (
+                <tr key={inv.id}>
+                  <td><strong>{inv.id}</strong></td>
+                  <td>${inv.amount.toFixed(2)}</td>
+                  <td>{inv.plan}</td>
+                  <td style={{ textTransform: 'capitalize' }}>{inv.payment_gateway}</td>
+                  <td><span className="status-badge active">{inv.status}</span></td>
+                  <td style={{ fontSize: 'var(--font-xs)', color: 'var(--text-tertiary)' }}>
+                    {new Date(inv.created_at).toLocaleDateString()}
+                  </td>
+                </tr>
+              ))}
+              {invoices.length === 0 && (
+                <tr>
+                  <td colSpan={6} style={{ textAlign: 'center', padding: 24, color: 'var(--text-tertiary)' }}>
+                    No invoice history available.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
         </div>
       </div>
     </>
@@ -1880,12 +2239,12 @@ graph = workflow.compile()`}</pre>
       </div>
       <div className="role-cards-grid">
         {[
-          { name: 'Weekly Lead Report', desc: 'All captured leads with source, status and value breakdown', icon: Target },
-          { name: 'Revenue Summary', desc: 'Monthly revenue from won deals and billing activity', icon: DollarSign },
-          { name: 'Campaign Performance', desc: 'Reach, engagement and conversion stats per campaign', icon: Megaphone },
-          { name: 'AI Token Usage Report', desc: 'LLM token consumption by agent and time period', icon: Sparkles },
-          { name: 'User Activity Log', desc: 'Login history, actions and session durations per user', icon: Users },
-          { name: 'System Health Report', desc: 'Database uptime, API latency and error rates', icon: Activity },
+          { key: 'leads', name: 'Weekly Lead Report', desc: 'All captured leads with source, status and value breakdown', icon: Target },
+          { key: 'revenue', name: 'Revenue Summary', desc: 'Monthly revenue from won deals and billing activity', icon: DollarSign },
+          { key: 'campaigns', name: 'Campaign Performance', desc: 'Reach, engagement and conversion stats per campaign', icon: Megaphone },
+          { key: 'tokens', name: 'AI Token Usage Report', desc: 'LLM token consumption by agent and time period', icon: Sparkles },
+          { key: 'audit', name: 'User Activity Log', desc: 'Login history, actions and session durations per user', icon: Users },
+          { key: 'system', name: 'System Health Report', desc: 'Database uptime, API latency and error rates', icon: Activity },
         ].map(r => {
           const IconComp = r.icon;
           return (
@@ -1893,11 +2252,17 @@ graph = workflow.compile()`}</pre>
               <div className="role-card-header">
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                   <div style={{ color: 'var(--brand)' }}><IconComp size={16} /></div>
-                  <span className="role-card-name">{r.name}</span>
+                  <span className="role-card-name" style={{ marginLeft: 8 }}>{r.name}</span>
                 </div>
               </div>
               <p className="role-card-desc">{r.desc}</p>
-              <button className="btn-secondary" style={{ fontSize: 'var(--font-xs)', padding: '6px 12px' }}>Download PDF</button>
+              <button
+                className="btn-secondary"
+                style={{ fontSize: 'var(--font-xs)', padding: '6px 12px' }}
+                onClick={() => handleDownloadReport(r.key)}
+              >
+                Download CSV
+              </button>
             </div>
           );
         })}
@@ -1910,16 +2275,89 @@ graph = workflow.compile()`}</pre>
     <>
       <div className="module-header">
         <div className="module-title"><h2>Documents</h2><span>Contracts, proposals and shared files</span></div>
-        <button className="btn-primary"><Plus size={14} /> Upload</button>
+        <button className="btn-primary" onClick={() => document.getElementById('doc-upload-file')?.click()}>
+          <Plus size={14} /> Upload
+        </button>
       </div>
-      <div className="card">
-        <div className="empty-state">
-          <File size={40} className="empty-state-icon" />
-          <p className="empty-state-title">No documents yet</p>
-          <p className="empty-state-desc">Upload contracts, proposals, and shared files for your organization. Supported: PDF, DOCX, XLSX.</p>
-          <button className="btn-primary" style={{ marginTop: 8 }}><Plus size={14} /> Upload Document</button>
+
+      <input
+        type="file"
+        id="doc-upload-file"
+        style={{ display: 'none' }}
+        onChange={(e) => {
+          if (e.target.files?.[0]) {
+            uploadDocMutation.mutate(e.target.files[0]);
+          }
+        }}
+      />
+
+      {documents.length > 0 ? (
+        <div className="card">
+          <div className="data-table-wrapper">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Type</th>
+                  <th>Size</th>
+                  <th>Uploaded</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {documents.map(doc => (
+                  <tr key={doc.id}>
+                    <td><strong>{doc.name}</strong></td>
+                    <td><span className="perm-chip">{doc.file_type}</span></td>
+                    <td>{Math.round(doc.size_bytes / 1024)} KB</td>
+                    <td style={{ fontSize: 'var(--font-xs)', color: 'var(--text-tertiary)' }}>
+                      {new Date(doc.created_at || '').toLocaleDateString()}
+                    </td>
+                    <td>
+                      <div style={{ display: 'flex', gap: 8 }}>
+                        <button
+                          className="btn-secondary"
+                          style={{ fontSize: 10, padding: '3px 8px' }}
+                          onClick={() => {
+                            const token = localStorage.getItem('aibos_access_token');
+                            const baseUrl = 'http://localhost:8000/api/v1';
+                            window.open(`${baseUrl}/documents/${doc.id}/download?token=${token}`, '_blank');
+                          }}
+                        >
+                          Download
+                        </button>
+                        <button
+                          className="task-delete-btn"
+                          style={{ color: 'var(--danger)' }}
+                          onClick={() => deleteDocMutation.mutate(doc.id)}
+                          disabled={deleteDocMutation.isPending}
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
-      </div>
+      ) : (
+        <div className="card">
+          <div className="empty-state">
+            <File size={40} className="empty-state-icon" />
+            <p className="empty-state-title">No documents yet</p>
+            <p className="empty-state-desc">Upload contracts, proposals, and shared files for your organization. Supported: PDF, DOCX, XLSX.</p>
+            <button
+              className="btn-primary"
+              style={{ marginTop: 8 }}
+              onClick={() => document.getElementById('doc-upload-file')?.click()}
+            >
+              <Plus size={14} /> Upload Document
+            </button>
+          </div>
+        </div>
+      )}
     </>
   );
 

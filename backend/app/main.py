@@ -10,8 +10,8 @@ from app.core.config import settings
 from app.core.security import get_security_headers
 from app.core import telemetry
 from app.core.realtime import sio
-from app.api.v1.endpoints import health, system, auth, dashboard, leads, deals, integrations
-from app.core.database import is_postgres_offline, sqlite_engine, postgres_engine, seed_database, SqliteSessionLocal, AsyncSessionLocal
+from app.api.v1.endpoints import health, system, auth, dashboard, leads, deals, integrations, workflows, kb, documents, voice, reports, billing, oauth, whatsapp, twilio_integration
+from app.core.database import is_postgres_offline, sqlite_engine, postgres_engine, seed_database, SqliteSessionLocal, AsyncSessionLocal, init_mongo_indexes
 from app.models.auth import Base
 from app.models import business as _business_models  # noqa: F401 ensures tables register on Base.metadata
 from app.models import integrations as _integrations_models  # noqa: F401 ensures tables register on Base.metadata
@@ -41,6 +41,15 @@ async def lifespan(app: FastAPI):
     async with session_factory() as session:
         await seed_database(session)
     logger.info("Default seed metadata successfully populated.")
+    
+    # Initialize MongoDB collections index
+    logger.info("Initializing MongoDB indexes...")
+    await init_mongo_indexes()
+
+    # Initialize Qdrant collection
+    logger.info("Initializing Qdrant collections...")
+    from app.core.qdrant_vector import init_qdrant_collection
+    init_qdrant_collection()
     
     yield
 
@@ -77,6 +86,25 @@ else:
     # Allow localhost, 127.0.0.1, and subdomains in development
     fastapi_app.add_middleware(TrustedHostMiddleware, allowed_hosts=["localhost", "127.0.0.1", "*.localhost"])
 
+from fastapi.responses import JSONResponse
+from app.core.redis_cache import RedisRateLimiter
+
+limiter = RedisRateLimiter()
+
+
+@fastapi_app.middleware("http")
+async def rate_limiting_middleware(request: Request, call_next):
+    if request.url.path.startswith(settings.API_V1_STR) and not request.url.path.endswith("/health"):
+        client_ip = request.client.host if request.client else "unknown"
+        endpoint = request.url.path
+        if await limiter.is_rate_limited(client_ip, endpoint, limit=120, period_seconds=60):
+            return JSONResponse(
+                status_code=429,
+                content={"detail": "Too many requests. Please check back in a minute."}
+            )
+    return await call_next(request)
+
+
 # Execution Time & Security Headers Middleware
 @fastapi_app.middleware("http")
 async def add_timing_and_security_headers(request: Request, call_next):
@@ -102,6 +130,15 @@ fastapi_app.include_router(dashboard.router, prefix=settings.API_V1_STR + "/dash
 fastapi_app.include_router(leads.router, prefix=settings.API_V1_STR + "/leads", tags=["Leads"])
 fastapi_app.include_router(deals.router, prefix=settings.API_V1_STR + "/deals", tags=["Deals / Pipeline"])
 fastapi_app.include_router(integrations.router, prefix=settings.API_V1_STR + "/integrations", tags=["Integrations"])
+fastapi_app.include_router(workflows.router, prefix=settings.API_V1_STR + "/workflows", tags=["Workflows / Automations"])
+fastapi_app.include_router(kb.router, prefix=settings.API_V1_STR + "/kb", tags=["Knowledge Base"])
+fastapi_app.include_router(documents.router, prefix=settings.API_V1_STR + "/documents", tags=["Documents"])
+fastapi_app.include_router(voice.router, prefix=settings.API_V1_STR + "/voice", tags=["AI Voice"])
+fastapi_app.include_router(reports.router, prefix=settings.API_V1_STR + "/reports", tags=["Reports"])
+fastapi_app.include_router(billing.router, prefix=settings.API_V1_STR + "/billing", tags=["Billing"])
+fastapi_app.include_router(oauth.router, prefix=settings.API_V1_STR + "/oauth", tags=["OAuth Authentication"])
+fastapi_app.include_router(whatsapp.router, prefix=settings.API_V1_STR + "/whatsapp", tags=["WhatsApp Platform"])
+fastapi_app.include_router(twilio_integration.router, prefix=settings.API_V1_STR + "/twilio", tags=["Twilio Platform"])
 
 @fastapi_app.get("/")
 async def root():

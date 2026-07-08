@@ -4,7 +4,7 @@ import time
 import platform
 import os
 from datetime import datetime, date, time as dt_time, timedelta
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy import select, func
@@ -419,12 +419,172 @@ async def get_users_list(
                 "status": u.status,
                 "role_id": u.role_id,
                 "role_name": u.role.name if u.role else u.role_id,
+                "permissions": [p.id for p in u.role.permissions] if u.role else [],
                 "created_at": u.created_at.isoformat() if u.created_at else None,
                 "last_login": u.last_login.isoformat() if u.last_login else None,
             }
             for u in users
         ],
         "total": len(users),
+    }
+
+
+class UserInviteBody(BaseModel):
+    name: str
+    email: str
+    role: str
+    permissions: List[str] = []
+
+
+@router.post("/users/invite", response_model=Dict[str, Any])
+async def invite_user(
+    body: UserInviteBody,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    from app.core.security import get_password_hash
+    import secrets
+
+    name_parts = body.name.strip().split(" ", 1)
+    first_name = name_parts[0]
+    last_name = name_parts[1] if len(name_parts) > 1 else ""
+
+    # Check if user already exists
+    existing = await db.execute(select(User).where(User.email == body.email.strip()))
+    if existing.scalar_one_or_none():
+        raise HTTPException(status_code=400, detail="User with this email already exists")
+
+    # Add user
+    new_u = User(
+        organization_id=current_user.organization_id,
+        first_name=first_name,
+        last_name=last_name,
+        email=body.email.strip(),
+        password_hash=get_password_hash("123456"),
+        status="invited",
+        role_id=body.role
+    )
+    db.add(new_u)
+    await db.commit()
+    await db.refresh(new_u)
+
+    invite_token = secrets.token_urlsafe(16)
+    invite_link = f"http://localhost:3000/auth/login?invite={invite_token}"
+
+    return {
+        "user": {
+            "id": new_u.id,
+            "first_name": new_u.first_name,
+            "last_name": new_u.last_name,
+            "email": new_u.email,
+            "status": new_u.status,
+            "role_id": new_u.role_id,
+        },
+        "invite_link": invite_link
+    }
+
+
+class UserUpdateBody(BaseModel):
+    name: Optional[str] = None
+    email: Optional[str] = None
+    role: Optional[str] = None
+    status: Optional[str] = None
+
+
+@router.patch("/users/{user_id}", response_model=Dict[str, Any])
+async def update_user_details(
+    user_id: str,
+    body: UserUpdateBody,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    u = await db.get(User, user_id)
+    if not u or u.organization_id != current_user.organization_id:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    if body.name is not None:
+        name_parts = body.name.strip().split(" ", 1)
+        u.first_name = name_parts[0]
+        u.last_name = name_parts[1] if len(name_parts) > 1 else ""
+    if body.email is not None:
+        u.email = body.email.strip()
+    if body.role is not None:
+        u.role_id = body.role
+    if body.status is not None:
+        u.status = body.status
+
+    await db.commit()
+    await db.refresh(u)
+    return {
+        "id": u.id,
+        "first_name": u.first_name,
+        "last_name": u.last_name,
+        "email": u.email,
+        "status": u.status,
+        "role_id": u.role_id
+    }
+
+
+@router.delete("/users/{user_id}", response_model=Dict[str, Any])
+async def delete_user(
+    user_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    if user_id == current_user.id:
+        raise HTTPException(status_code=400, detail="Cannot delete yourself")
+    u = await db.get(User, user_id)
+    if not u or u.organization_id != current_user.organization_id:
+        raise HTTPException(status_code=404, detail="User not found")
+    await db.delete(u)
+    await db.commit()
+    return {"success": True}
+
+
+@router.post("/users/{user_id}/reset-password", response_model=Dict[str, Any])
+async def reset_user_password(
+    user_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    u = await db.get(User, user_id)
+    if not u or u.organization_id != current_user.organization_id:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    import secrets
+    token = secrets.token_urlsafe(16)
+    reset_link = f"http://localhost:3000/auth/reset-password?token={token}"
+    return {"reset_link": reset_link}
+
+
+class RoleUpdateBody(BaseModel):
+    permissions: List[str]
+
+
+@router.patch("/roles/{role_id}", response_model=Dict[str, Any])
+async def update_role_permissions(
+    role_id: str,
+    body: RoleUpdateBody,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    role = await db.get(Role, role_id)
+    if not role:
+        raise HTTPException(status_code=404, detail="Role not found")
+
+    role.permissions.clear()
+
+    for p_id in body.permissions:
+        perm = await db.get(Permission, p_id)
+        if perm:
+            role.permissions.append(perm)
+
+    await db.commit()
+    await db.refresh(role)
+    return {
+        "id": role.id,
+        "name": role.name,
+        "permissions": [{"id": p.id, "name": p.name} for p in role.permissions]
     }
 
 
@@ -479,6 +639,79 @@ async def get_organization_details(
         "name": org.name,
         "slug": org.slug,
         "status": org.status,
+        "logo_char": org.logo_char,
+        "gst_number": org.gst_number,
+        "address": org.address,
+        "timezone": org.timezone,
+        "brand_color": org.brand_color,
+        "subscription_plan": org.subscription_plan,
+        "smtp_host": org.smtp_host,
+        "smtp_port": org.smtp_port,
+        "smtp_user": org.smtp_user,
+        "smtp_pass": org.smtp_pass,
+        "user_count": user_count,
+        "created_at": org.created_at.isoformat() if org.created_at else None,
+    }
+
+
+class OrganizationUpdateBody(BaseModel):
+    name: Optional[str] = None
+    slug: Optional[str] = None
+    logo_char: Optional[str] = None
+    gst_number: Optional[str] = None
+    address: Optional[str] = None
+    timezone: Optional[str] = None
+    brand_color: Optional[str] = None
+    subscription_plan: Optional[str] = None
+    smtp_host: Optional[str] = None
+    smtp_port: Optional[int] = None
+    smtp_user: Optional[str] = None
+    smtp_pass: Optional[str] = None
+
+
+@router.patch("/organization", response_model=Dict[str, Any])
+async def update_organization_details(
+    body: OrganizationUpdateBody,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    query = (
+        select(Organization)
+        .where(Organization.id == current_user.organization_id)
+    )
+    result = await db.execute(query)
+    org = result.scalar_one_or_none()
+
+    if not org:
+        raise HTTPException(status_code=404, detail="Organization not found")
+
+    changes = body.model_dump(exclude_unset=True)
+    for field, value in changes.items():
+        setattr(org, field, value)
+
+    await db.commit()
+    await db.refresh(org)
+
+    user_count_result = await db.execute(
+        select(func.count(User.id)).where(User.organization_id == org.id)
+    )
+    user_count = user_count_result.scalar() or 0
+
+    return {
+        "id": org.id,
+        "name": org.name,
+        "slug": org.slug,
+        "status": org.status,
+        "logo_char": org.logo_char,
+        "gst_number": org.gst_number,
+        "address": org.address,
+        "timezone": org.timezone,
+        "brand_color": org.brand_color,
+        "subscription_plan": org.subscription_plan,
+        "smtp_host": org.smtp_host,
+        "smtp_port": org.smtp_port,
+        "smtp_user": org.smtp_user,
+        "smtp_pass": org.smtp_pass,
         "user_count": user_count,
         "created_at": org.created_at.isoformat() if org.created_at else None,
     }

@@ -14,7 +14,7 @@ while _current:
     _parent = os.path.dirname(_current)
     if _parent == _current:
         break
-    if os.path.exists(os.path.join(_parent, "agents")):
+    if os.path.exists(os.path.join(_parent, "agents", "graph", "workflow.py")):
         if _parent not in sys.path:
             sys.path.append(_parent)
         break

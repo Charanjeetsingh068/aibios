@@ -43,6 +43,16 @@ export interface OrganizationDetails {
   status: string;
   user_count: number;
   created_at: string | null;
+  logo_char?: string | null;
+  gst_number?: string | null;
+  address?: string | null;
+  timezone?: string | null;
+  brand_color?: string | null;
+  subscription_plan?: string | null;
+  smtp_host?: string | null;
+  smtp_port?: number | null;
+  smtp_user?: string | null;
+  smtp_pass?: string | null;
 }
 
 export interface AuditLogEntry {
@@ -187,5 +197,35 @@ export async function createMeeting(title: string, scheduledAt: string): Promise
 
 export async function deleteMeeting(meetingId: string): Promise<{ success: boolean }> {
   const response = await axiosInstance.delete(`/dashboard/meetings/${meetingId}`);
+  return response.data;
+}
+
+export async function updateOrganizationDetails(data: any): Promise<OrganizationDetails> {
+  const response = await axiosInstance.patch('/dashboard/organization', data);
+  return response.data;
+}
+
+export async function inviteUser(data: { name: string; email: string; role: string; permissions: string[] }): Promise<{ user: DashboardUser; invite_link: string }> {
+  const response = await axiosInstance.post('/dashboard/users/invite', data);
+  return response.data;
+}
+
+export async function updateUser(userId: string, data: { name?: string; email?: string; role?: string; status?: string }): Promise<DashboardUser> {
+  const response = await axiosInstance.patch(`/dashboard/users/${userId}`, data);
+  return response.data;
+}
+
+export async function deleteDashboardUser(userId: string): Promise<{ success: boolean }> {
+  const response = await axiosInstance.delete(`/dashboard/users/${userId}`);
+  return response.data;
+}
+
+export async function resetUserPassword(userId: string): Promise<{ reset_link: string }> {
+  const response = await axiosInstance.post(`/dashboard/users/${userId}/reset-password`);
+  return response.data;
+}
+
+export async function updateRolePermissions(roleId: string, permissions: string[]): Promise<DashboardRole> {
+  const response = await axiosInstance.patch(`/dashboard/roles/${roleId}`, { permissions });
   return response.data;
 }

@@ -2,28 +2,72 @@
 
 import { useState, useEffect } from 'react';
 import { Mail, Phone, Globe, Shield, Calendar, Clock, ArrowLeft, Key, Building, Check, Trash2, Settings, X, UserPlus, ShieldAlert, KeyRound, Edit2, Link } from 'lucide-react';
-import { getMe, UserResponse } from '../../services/authService';
+import { getMe } from '../../services/authService';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import {
+  fetchOrganizationDetails,
+  updateOrganizationDetails,
+  fetchDashboardUsers,
+  fetchDashboardRoles,
+  inviteUser,
+  updateUser,
+  deleteDashboardUser,
+  resetUserPassword
+} from '../../services/dashboardService';
 import '../../styles/dashboard.css';
 
 export default function ProfilePage() {
-  const [profile, setProfile] = useState<UserResponse | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState('');
-  
-  // Tabs Layout State
+  const queryClient = useQueryClient();
   const [activeTab, setActiveTab] = useState<'personal' | 'organization'>('personal');
 
-  // Organization settings states
-  const [orgName, setOrgName] = useState('Demo Corp');
-  const [orgSlug, setOrgSlug] = useState('demo');
+  // React Query queries
+  const profileQuery = useQuery({ queryKey: ['me'], queryFn: getMe });
+  const profile = profileQuery.data;
+
+  const orgQuery = useQuery({ queryKey: ['organization'], queryFn: fetchOrganizationDetails });
+  const orgDetails = orgQuery.data;
+
+  const usersQuery = useQuery({ queryKey: ['dashboard-users'], queryFn: fetchDashboardUsers });
+  const orgUsersRaw = usersQuery.data?.users ?? [];
+  const orgUsers = orgUsersRaw.map((u: any) => ({
+    ...u,
+    name: `${u.first_name} ${u.last_name}`,
+    role: u.role_id,
+  }));
+
+  const rolesQuery = useQuery({ queryKey: ['dashboard-roles'], queryFn: fetchDashboardRoles });
+
+  // Form local states
+  const [orgName, setOrgName] = useState('');
+  const [orgSlug, setOrgSlug] = useState('');
   const [companyLogo, setCompanyLogo] = useState('Ω');
-  const [gstNumber, setGstNumber] = useState('27AAAAA0000A1Z5');
-  const [officeAddress, setOfficeAddress] = useState('123 Business Tower, Suite 400, Mumbai, MH, 400001, India');
+  const [gstNumber, setGstNumber] = useState('');
+  const [officeAddress, setOfficeAddress] = useState('');
   const [orgTimezone, setOrgTimezone] = useState('Asia/Kolkata');
   const [brandColor, setBrandColor] = useState('#3b82f6');
   const [subscriptionPlan, setSubscriptionPlan] = useState('enterprise');
 
-  // RBAC Permission Sets
+  // Sync state when orgQuery completes
+  useEffect(() => {
+    if (orgDetails) {
+      setOrgName(orgDetails.name || '');
+      setOrgSlug(orgDetails.slug || '');
+      setCompanyLogo(orgDetails.logo_char || 'Ω');
+      setGstNumber(orgDetails.gst_number || '');
+      setOfficeAddress(orgDetails.address || '');
+      setOrgTimezone(orgDetails.timezone || 'Asia/Kolkata');
+      setBrandColor(orgDetails.brand_color || '#3b82f6');
+      setSubscriptionPlan(orgDetails.subscription_plan || 'enterprise');
+      applyBrandColor(orgDetails.brand_color || '#3b82f6');
+    }
+  }, [orgDetails]);
+
+  // Toast and other display states
+  const [inviteName, setInviteName] = useState('');
+  const [inviteEmail, setInviteEmail] = useState('');
+  const [inviteRole, setInviteRole] = useState('manager');
+  
+  // Initial permissions for invite form
   const ROLE_DEFAULT_PERMISSIONS: Record<string, string[]> = {
     super_admin: ["leads:read", "leads:write", "org:read", "org:write", "agents:read", "agents:write"],
     admin: ["leads:read", "leads:write", "org:read", "org:write", "agents:read", "agents:write"],
@@ -46,24 +90,12 @@ export default function ProfilePage() {
     { id: "agents:write", name: "Write Agents", desc: "Modify agent workflows and states" }
   ];
 
-  // Membership Users list state
-  const [orgUsers, setOrgUsers] = useState<any[]>([
-    { id: 1, name: "Charanjeet Singh", email: "charanjeet.s7730@gmail.com", role: "super_admin", status: "active", permissions: ["leads:read", "leads:write", "org:read", "org:write", "agents:read", "agents:write"] },
-    { id: 2, name: "Jane Smith", email: "jane@democorp.com", role: "admin", status: "active", permissions: ["leads:read", "leads:write", "org:read", "org:write", "agents:read", "agents:write"] },
-    { id: 3, name: "David Miller", email: "david@democorp.com", role: "manager", status: "active", permissions: ["leads:read", "leads:write", "org:read", "agents:read"] },
-    { id: 4, name: "AI Agent Alpha", email: "alpha@democorp.com", role: "ai_agent", status: "invited", permissions: ["leads:read", "leads:write", "agents:read"] }
-  ]);
-
-  // Invite form states
-  const [inviteName, setInviteName] = useState('');
-  const [inviteEmail, setInviteEmail] = useState('');
-  const [inviteRole, setInviteRole] = useState('manager');
   const [invitePermissions, setInvitePermissions] = useState<string[]>(ROLE_DEFAULT_PERMISSIONS.manager);
   const [generatedInviteLink, setGeneratedInviteLink] = useState('');
 
   // Edit user modal states
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
-  const [editingUserId, setEditingUserId] = useState<number | null>(null);
+  const [editingUserId, setEditingUserId] = useState<string | null>(null);
   const [editName, setEditName] = useState('');
   const [editEmail, setEditEmail] = useState('');
   const [editRole, setEditRole] = useState('manager');
@@ -91,7 +123,153 @@ export default function ProfilePage() {
     }, 3000);
   };
 
-  // Helper for dynamic coloring of all 10 roles
+  // Mutations
+  const invalidate = (key: string) => queryClient.invalidateQueries({ queryKey: [key] });
+
+  const updateOrgMutation = useMutation({
+    mutationFn: updateOrganizationDetails,
+    onSuccess: () => {
+      invalidate('organization');
+      showToast('Organization settings updated successfully!', 'success');
+    },
+    onError: (err: any) => showToast(err?.message || 'Failed to update organization', 'error'),
+  });
+
+  const inviteUserMutation = useMutation({
+    mutationFn: inviteUser,
+    onSuccess: (res) => {
+      invalidate('dashboard-users');
+      setGeneratedInviteLink(res.invite_link);
+      setInviteName('');
+      setInviteEmail('');
+      showToast(`User ${res.user.first_name} invited! Copy link below.`, 'success');
+    },
+    onError: (err: any) => showToast(err?.message || 'Failed to invite user', 'error'),
+  });
+
+  const updateUserMutation = useMutation({
+    mutationFn: ({ userId, data }: { userId: string; data: any }) => updateUser(userId, data),
+    onSuccess: () => {
+      invalidate('dashboard-users');
+      setIsEditModalOpen(false);
+      showToast('User configurations saved successfully.', 'success');
+    },
+    onError: (err: any) => showToast(err?.message || 'Failed to update user', 'error'),
+  });
+
+  const deleteUserMutation = useMutation({
+    mutationFn: deleteDashboardUser,
+    onSuccess: () => {
+      invalidate('dashboard-users');
+      showToast('User deleted from organization.', 'success');
+    },
+    onError: (err: any) => showToast(err?.message || 'Failed to delete user', 'error'),
+  });
+
+  const resetPasswordMutation = useMutation({
+    mutationFn: resetUserPassword,
+    onSuccess: (res, variables) => {
+      const usr = orgUsers.find(u => u.id === variables);
+      const name = usr ? usr.name : 'User';
+      setResetAlertLink(res.reset_link);
+      setResetAlertUser(name);
+      showToast(`Password reset link created for ${name}`, 'success');
+    },
+    onError: (err: any) => showToast(err?.message || 'Failed to reset password', 'error'),
+  });
+
+  // Handlers
+  const handleSaveOrganization = (e: React.FormEvent) => {
+    e.preventDefault();
+    updateOrgMutation.mutate({
+      name: orgName,
+      slug: orgSlug,
+      logo_char: companyLogo,
+      gst_number: gstNumber,
+      address: officeAddress,
+      timezone: orgTimezone,
+      brand_color: brandColor,
+      subscription_plan: subscriptionPlan,
+    });
+  };
+
+  const handleInviteUser = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!inviteName.trim() || !inviteEmail.trim()) return;
+    inviteUserMutation.mutate({
+      name: inviteName.trim(),
+      email: inviteEmail.trim(),
+      role: inviteRole,
+      permissions: invitePermissions,
+    });
+  };
+
+  const handleInviteRoleChange = (role: string) => {
+    setInviteRole(role);
+    setInvitePermissions(ROLE_DEFAULT_PERMISSIONS[role] || []);
+  };
+
+  const toggleInvitePermission = (permId: string) => {
+    setInvitePermissions(prev => 
+      prev.includes(permId) ? prev.filter(p => p !== permId) : [...prev, permId]
+    );
+  };
+
+  const handleDeleteUser = (id: string) => {
+    if (id === "superadmin-uuid-placeholder-123456") {
+      showToast('Cannot remove primary organization owner!', 'error');
+      return;
+    }
+    deleteUserMutation.mutate(id);
+  };
+
+  const toggleSuspendUser = (id: string) => {
+    if (id === "superadmin-uuid-placeholder-123456") {
+      showToast('Cannot suspend organization owner!', 'error');
+      return;
+    }
+    const usr = orgUsers.find(u => u.id === id);
+    if (!usr) return;
+    const nextStatus = usr.status === 'suspended' ? 'active' : 'suspended';
+    updateUserMutation.mutate({ userId: id, data: { status: nextStatus } });
+  };
+
+  const triggerResetPassword = (userObj: any) => {
+    resetPasswordMutation.mutate(userObj.id);
+  };
+
+  const openEditModal = (userObj: any) => {
+    setEditingUserId(userObj.id);
+    setEditName(userObj.name);
+    setEditEmail(userObj.email);
+    setEditRole(userObj.role);
+    setEditPermissions(userObj.permissions || []);
+    setIsEditModalOpen(true);
+  };
+
+  const handleEditRoleChange = (role: string) => {
+    setEditRole(role);
+    setEditPermissions(ROLE_DEFAULT_PERMISSIONS[role] || []);
+  };
+
+  const toggleEditPermission = (permId: string) => {
+    setEditPermissions(prev => 
+      prev.includes(permId) ? prev.filter(p => p !== permId) : [...prev, permId]
+    );
+  };
+
+  const handleSaveChanges = () => {
+    if (!editingUserId) return;
+    updateUserMutation.mutate({
+      userId: editingUserId,
+      data: {
+        name: editName,
+        email: editEmail,
+        role: editRole,
+      }
+    });
+  };
+
   const getRoleBadgeStyle = (role: string) => {
     switch (role) {
       case 'super_admin': return { backgroundColor: 'rgba(59, 130, 246, 0.15)', color: 'var(--info)' };
@@ -124,182 +302,9 @@ export default function ProfilePage() {
     }
   };
 
-  useEffect(() => {
-    // 1. Fetch Profile
-    const fetchProfile = async () => {
-      try {
-        const data = await getMe();
-        setProfile(data);
-      } catch (err: any) {
-        setError(err.message || 'Failed to retrieve profile details.');
-        setTimeout(() => {
-          window.location.href = '/auth/login';
-        }, 1500);
-      } finally {
-        setIsLoading(false);
-      }
-    };
-    fetchProfile();
-
-    // 2. Load cached settings
-    if (typeof window !== 'undefined') {
-      const cachedName = localStorage.getItem('aibos_org_name');
-      const cachedSlug = localStorage.getItem('aibos_org_slug');
-      const cachedLogo = localStorage.getItem('aibos_org_logo');
-      const cachedGst = localStorage.getItem('aibos_org_gst');
-      const cachedAddress = localStorage.getItem('aibos_org_address');
-      const cachedTimezone = localStorage.getItem('aibos_org_timezone');
-      const cachedColor = localStorage.getItem('aibos_org_color');
-      const cachedPlan = localStorage.getItem('aibos_org_plan');
-      const cachedUsers = localStorage.getItem('aibos_org_users');
-
-      if (cachedName) setOrgName(cachedName);
-      if (cachedSlug) setOrgSlug(cachedSlug);
-      if (cachedLogo) setCompanyLogo(cachedLogo);
-      if (cachedGst) setGstNumber(cachedGst);
-      if (cachedAddress) setOfficeAddress(cachedAddress);
-      if (cachedTimezone) setOrgTimezone(cachedTimezone);
-      if (cachedColor) {
-        setBrandColor(cachedColor);
-        applyBrandColor(cachedColor);
-      }
-      if (cachedPlan) setSubscriptionPlan(cachedPlan);
-      if (cachedUsers) setOrgUsers(JSON.parse(cachedUsers));
-    }
-  }, []);
-
-  const handleSaveOrganization = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('aibos_org_name', orgName);
-      localStorage.setItem('aibos_org_slug', orgSlug);
-      localStorage.setItem('aibos_org_logo', companyLogo);
-      localStorage.setItem('aibos_org_gst', gstNumber);
-      localStorage.setItem('aibos_org_address', officeAddress);
-      localStorage.setItem('aibos_org_timezone', orgTimezone);
-      localStorage.setItem('aibos_org_color', brandColor);
-      localStorage.setItem('aibos_org_plan', subscriptionPlan);
-      
-      applyBrandColor(brandColor);
-      showToast('Organization settings updated successfully!', 'success');
-    }
-  };
-
-  // Invite user handler
-  const handleInviteUser = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!inviteName.trim() || !inviteEmail.trim()) return;
-
-    const newUser = {
-      id: Date.now(),
-      name: inviteName.trim(),
-      email: inviteEmail.trim(),
-      role: inviteRole,
-      status: 'invited',
-      permissions: invitePermissions
-    };
-
-    const updatedUsers = [...orgUsers, newUser];
-    setOrgUsers(updatedUsers);
-    localStorage.setItem('aibos_org_users', JSON.stringify(updatedUsers));
-
-    // Generate invite URL
-    const randToken = Math.random().toString(36).substring(2, 10) + Math.random().toString(36).substring(2, 10);
-    setGeneratedInviteLink(`http://localhost:3000/auth/login?invite=${randToken}`);
-    
-    setInviteName('');
-    setInviteEmail('');
-    showToast(`User ${inviteName} invited! Copy link below.`, 'success');
-  };
-
-  const handleInviteRoleChange = (role: string) => {
-    setInviteRole(role);
-    setInvitePermissions(ROLE_DEFAULT_PERMISSIONS[role] || []);
-  };
-
-  const toggleInvitePermission = (permId: string) => {
-    setInvitePermissions(prev => 
-      prev.includes(permId) ? prev.filter(p => p !== permId) : [...prev, permId]
-    );
-  };
-
-  // Delete user handler
-  const handleDeleteUser = (id: number) => {
-    if (id === 1) {
-      showToast('Cannot remove primary organization owner!', 'error');
-      return;
-    }
-    const updatedUsers = orgUsers.filter(u => u.id !== id);
-    setOrgUsers(updatedUsers);
-    localStorage.setItem('aibos_org_users', JSON.stringify(updatedUsers));
-    showToast('User deleted from organization.', 'success');
-  };
-
-  // Suspend / Activate user handler
-  const toggleSuspendUser = (id: number) => {
-    if (id === 1) {
-      showToast('Cannot suspend organization owner!', 'error');
-      return;
-    }
-    const updatedUsers = orgUsers.map(u => {
-      if (u.id === id) {
-        const nextStatus = u.status === 'suspended' ? 'active' : 'suspended';
-        showToast(`User account ${nextStatus === 'suspended' ? 'suspended' : 'activated'}.`, 'success');
-        return { ...u, status: nextStatus };
-      }
-      return u;
-    });
-    setOrgUsers(updatedUsers);
-    localStorage.setItem('aibos_org_users', JSON.stringify(updatedUsers));
-  };
-
-  // Reset password handler
-  const triggerResetPassword = (userObj: any) => {
-    const randToken = Math.random().toString(36).substring(2, 10) + Math.random().toString(36).substring(2, 10);
-    setResetAlertLink(`http://localhost:3000/auth/reset-password?token=${randToken}`);
-    setResetAlertUser(userObj.name);
-    showToast(`Password reset link created for ${userObj.name}`, 'success');
-  };
-
-  // Edit user modal open / save
-  const openEditModal = (userObj: any) => {
-    setEditingUserId(userObj.id);
-    setEditName(userObj.name);
-    setEditEmail(userObj.email);
-    setEditRole(userObj.role);
-    setEditPermissions(userObj.permissions || []);
-    setIsEditModalOpen(true);
-  };
-
-  const handleEditRoleChange = (role: string) => {
-    setEditRole(role);
-    setEditPermissions(ROLE_DEFAULT_PERMISSIONS[role] || []);
-  };
-
-  const toggleEditPermission = (permId: string) => {
-    setEditPermissions(prev => 
-      prev.includes(permId) ? prev.filter(p => p !== permId) : [...prev, permId]
-    );
-  };
-
-  const handleSaveChanges = () => {
-    const updatedUsers = orgUsers.map(u => {
-      if (u.id === editingUserId) {
-        return {
-          ...u,
-          name: editName,
-          email: editEmail,
-          role: editRole,
-          permissions: editPermissions
-        };
-      }
-      return u;
-    });
-    setOrgUsers(updatedUsers);
-    localStorage.setItem('aibos_org_users', JSON.stringify(updatedUsers));
-    setIsEditModalOpen(false);
-    showToast('User configurations saved successfully.', 'success');
-  };
+  // Display and status checkers
+  const isLoading = profileQuery.isLoading || orgQuery.isLoading || usersQuery.isLoading || rolesQuery.isLoading;
+  const error = (profileQuery.error as any)?.message || (orgQuery.error as any)?.message;
 
   if (isLoading) {
     return (
@@ -386,7 +391,7 @@ export default function ProfilePage() {
                   className="settings-select"
                   value={editRole}
                   onChange={(e) => handleEditRoleChange(e.target.value)}
-                  disabled={editingUserId === 1} // Primary Owner role cannot change
+                  disabled={editingUserId === '1' || editingUserId === 'superadmin-uuid-placeholder-123456'} // Primary Owner role cannot change
                 >
                   <option value="super_admin">Super Admin</option>
                   <option value="admin">Admin</option>
@@ -414,7 +419,7 @@ export default function ProfilePage() {
                         type="checkbox" 
                         checked={editPermissions.includes(p.id)}
                         onChange={() => toggleEditPermission(p.id)}
-                        disabled={editingUserId === 1} // Primary Owner permissions locked
+                        disabled={editingUserId === '1' || editingUserId === 'superadmin-uuid-placeholder-123456'} // Primary Owner permissions locked
                       />
                       <div style={{ display: 'flex', flexDirection: 'column' }}>
                         <strong style={{ fontSize: '11px', color: 'var(--text-primary)' }}>{p.name}</strong>

@@ -48,6 +48,8 @@ _sqlite_fallback_active = None
 
 async def is_postgres_offline() -> bool:
     global _sqlite_fallback_active
+    if settings.ENVIRONMENT in ("production", "prod"):
+        return False
     if _sqlite_fallback_active is not None:
         return _sqlite_fallback_active
     try:
@@ -232,3 +234,31 @@ async def seed_database(session):
         )
         session.add(admin_user)
         await session.commit()
+
+
+from contextlib import asynccontextmanager
+
+@asynccontextmanager
+async def mongo_transaction():
+    """Context manager to execute multi-document operations in MongoDB transactions."""
+    async with await mongo_client.start_session() as session:
+        async with session.start_transaction():
+            try:
+                yield session
+                await session.commit_transaction()
+            except Exception:
+                await session.abort_transaction()
+                raise
+
+
+async def init_mongo_indexes():
+    """Verifies and creates necessary production indexes for MongoDB collections."""
+    try:
+        db = mongo_client.get_default_database()
+        # Index audit logs on timestamp for retrieval performance
+        await db.audit_logs.create_index("timestamp")
+        # Index chat/message histories for conversation sync
+        await db.chat_history.create_index([("session_id", 1), ("created_at", 1)])
+        logger.info("MongoDB indexes verified successfully.")
+    except Exception as e:
+        logger.error(f"Failed to verify/create MongoDB indexes: {e}")

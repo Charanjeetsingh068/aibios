@@ -91,4 +91,10 @@ class Settings(BaseSettings):
     TWILIO_PHONE_NUMBER: Optional[str] = None
     ELEVENLABS_API_KEY: Optional[str] = None
 
+    # S3 Object Storage Configuration
+    AWS_ACCESS_KEY_ID: Optional[str] = None
+    AWS_SECRET_ACCESS_KEY: Optional[str] = None
+    AWS_STORAGE_BUCKET_NAME: Optional[str] = None
+    AWS_S3_ENDPOINT_URL: Optional[str] = None
+
 settings = Settings()
