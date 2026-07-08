@@ -1,5 +1,6 @@
 import time
 import logging
+import socketio
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -7,9 +8,13 @@ from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.middleware.httpsredirect import HTTPSRedirectMiddleware
 from app.core.config import settings
 from app.core.security import get_security_headers
-from app.api.v1.endpoints import health, system, auth
+from app.core import telemetry
+from app.core.realtime import sio
+from app.api.v1.endpoints import health, system, auth, dashboard, leads, deals, integrations
 from app.core.database import is_postgres_offline, sqlite_engine, postgres_engine, seed_database, SqliteSessionLocal, AsyncSessionLocal
 from app.models.auth import Base
+from app.models import business as _business_models  # noqa: F401 ensures tables register on Base.metadata
+from app.models import integrations as _integrations_models  # noqa: F401 ensures tables register on Base.metadata
 
 # Setup logger
 logging.basicConfig(
@@ -40,7 +45,7 @@ async def lifespan(app: FastAPI):
     yield
 
 # Initialize FastAPI application with lifespan context
-app = FastAPI(
+fastapi_app = FastAPI(
     title=settings.PROJECT_NAME,
     description="AI-BOS Enterprise Business Operating System Backend Gateway",
     version="1.0.0",
@@ -52,7 +57,7 @@ app = FastAPI(
 
 # Apply CORS Middleware
 if settings.BACKEND_CORS_ORIGINS:
-    app.add_middleware(
+    fastapi_app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.BACKEND_CORS_ORIGINS,
         allow_credentials=True,
@@ -62,42 +67,49 @@ if settings.BACKEND_CORS_ORIGINS:
 
 # Apply HTTPS Redirection in Production
 if settings.ENVIRONMENT == "production":
-    app.add_middleware(HTTPSRedirectMiddleware)
+    fastapi_app.add_middleware(HTTPSRedirectMiddleware)
 
 # Apply Trusted Hosts Middleware
 if settings.ENVIRONMENT == "production":
     # Strict list of allowed hosts in production
-    app.add_middleware(TrustedHostMiddleware, allowed_hosts=["example.com", "*.example.com"])
+    fastapi_app.add_middleware(TrustedHostMiddleware, allowed_hosts=["example.com", "*.example.com"])
 else:
     # Allow localhost, 127.0.0.1, and subdomains in development
-    app.add_middleware(TrustedHostMiddleware, allowed_hosts=["localhost", "127.0.0.1", "*.localhost"])
+    fastapi_app.add_middleware(TrustedHostMiddleware, allowed_hosts=["localhost", "127.0.0.1", "*.localhost"])
 
 # Execution Time & Security Headers Middleware
-@app.middleware("http")
+@fastapi_app.middleware("http")
 async def add_timing_and_security_headers(request: Request, call_next):
     start_time = time.time()
     response = await call_next(request)
-    
+
     # Custom timing header
     process_time = time.time() - start_time
     response.headers["X-Response-Time-Sec"] = f"{process_time:.4f}"
-    
+    telemetry.record_request(process_time * 1000)
+
     # Fetch environment-specific security headers dynamically
     security_headers = get_security_headers(settings.ENVIRONMENT)
     for header_name, header_value in security_headers.items():
         response.headers[header_name] = header_value
-        
+
     return response
 
-app.include_router(health.router, prefix=settings.API_V1_STR, tags=["System Health"])
-app.include_router(system.router, prefix=settings.API_V1_STR + "/system", tags=["System Diagnostics"])
-app.include_router(auth.router, prefix=settings.API_V1_STR + "/auth", tags=["Enterprise Authentication"])
+fastapi_app.include_router(health.router, prefix=settings.API_V1_STR, tags=["System Health"])
+fastapi_app.include_router(system.router, prefix=settings.API_V1_STR + "/system", tags=["System Diagnostics"])
+fastapi_app.include_router(auth.router, prefix=settings.API_V1_STR + "/auth", tags=["Enterprise Authentication"])
+fastapi_app.include_router(dashboard.router, prefix=settings.API_V1_STR + "/dashboard", tags=["Enterprise Dashboard"])
+fastapi_app.include_router(leads.router, prefix=settings.API_V1_STR + "/leads", tags=["Leads"])
+fastapi_app.include_router(deals.router, prefix=settings.API_V1_STR + "/deals", tags=["Deals / Pipeline"])
+fastapi_app.include_router(integrations.router, prefix=settings.API_V1_STR + "/integrations", tags=["Integrations"])
 
-@app.get("/")
+@fastapi_app.get("/")
 async def root():
     return {
         "message": f"Welcome to the {settings.PROJECT_NAME} Platform",
         "api_documentation": "/docs",
         "status": "online"
     }
-# Trigger reload to load new env settings
+
+# Mount Socket.IO alongside the REST API so `uvicorn app.main:app` serves both.
+app = socketio.ASGIApp(sio, other_asgi_app=fastapi_app, socketio_path="socket.io")

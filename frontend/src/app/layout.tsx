@@ -1,10 +1,15 @@
-import type { Metadata } from 'next';
+import type { Metadata, Viewport } from 'next';
 import '../styles/globals.css';
+import QueryProvider from '../providers/QueryProvider';
 
 export const metadata: Metadata = {
   title: 'AI-BOS Enterprise Portal',
   description: 'AI Business Operating System Enterprise Administration Dashboard',
-  viewport: 'width=device-width, initial-scale=1',
+};
+
+export const viewport: Viewport = {
+  width: 'device-width',
+  initialScale: 1,
 };
 
 export default function RootLayout({
@@ -27,7 +32,7 @@ export default function RootLayout({
         <script dangerouslySetInnerHTML={{ __html: themeInitScript }} />
       </head>
       <body>
-        {children}
+        <QueryProvider>{children}</QueryProvider>
       </body>
     </html>
   );

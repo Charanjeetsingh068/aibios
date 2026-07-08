@@ -17,9 +17,18 @@ python-jose[cryptography]==3.3.0
 passlib[bcrypt]==1.7.4
 bcrypt==4.2.0
 
+# Realtime
+python-socketio==5.11.4
+
 # HTTP & Agents
 httpx==0.27.2
 langchain-core==0.2.30
 langgraph==0.2.16
 aiosqlite==0.20.0
 greenlet
+
+# System Diagnostics
+psutil==6.0.0
+
+# Testing
+pytest==8.3.3

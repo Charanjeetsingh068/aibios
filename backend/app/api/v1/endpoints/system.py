@@ -4,6 +4,7 @@ import socket
 import time
 import datetime
 import asyncio
+import logging
 from fastapi import APIRouter
 from typing import Dict, Any
 import sys
@@ -20,9 +21,13 @@ while _current:
     _current = _parent
 
 from app.core.config import settings
-from app.core.database import verify_postgres, verify_mongo, verify_redis, verify_qdrant
+from app.core.database import (
+    verify_postgres, verify_mongo, verify_redis, verify_qdrant,
+    is_postgres_offline, AsyncSessionLocal, SqliteSessionLocal, mongo_client, redis_client,
+)
 from agents.graph.workflow import graph
 
+logger = logging.getLogger(__name__)
 router = APIRouter()
 
 START_TIME = time.time()
@@ -129,23 +134,73 @@ async def system_info():
         "platform": platform.platform()
     }
 
+async def _check_with_latency(check_fn):
+    start = time.perf_counter()
+    ok = await check_fn()
+    latency_ms = round((time.perf_counter() - start) * 1000, 2)
+    return ok, latency_ms
+
+
+async def _postgres_version(use_sqlite: bool) -> str:
+    try:
+        from sqlalchemy import text
+        session_factory = SqliteSessionLocal if use_sqlite else AsyncSessionLocal
+        async with session_factory() as session:
+            if use_sqlite:
+                result = await session.execute(text("SELECT sqlite_version()"))
+            else:
+                result = await session.execute(text("SHOW server_version"))
+            return str(result.scalar() or "unknown")
+    except Exception as e:
+        logger.error(f"Failed to read database version: {e}")
+        return "unknown"
+
+
+async def _mongo_version() -> str:
+    try:
+        info = await asyncio.wait_for(mongo_client.admin.command("buildInfo"), timeout=2.0)
+        return str(info.get("version", "unknown"))
+    except Exception as e:
+        logger.error(f"Failed to read MongoDB version: {e}")
+        return "unknown"
+
+
+async def _redis_version() -> str:
+    try:
+        info = await asyncio.wait_for(redis_client.info(), timeout=2.0)
+        return str(info.get("redis_version", "unknown"))
+    except Exception as e:
+        logger.error(f"Failed to read Redis version: {e}")
+        return "unknown"
+
+
 @router.get("/database", response_model=Dict[str, Any])
 async def system_database():
-    """Runs live connectivity checks on all configured databases in parallel (Postgres, Mongo, Redis, Qdrant)."""
-    postgres_task = verify_postgres()
-    mongo_task = verify_mongo()
-    redis_task = verify_redis()
-    qdrant_task = verify_qdrant()
-    
-    postgres_ok, mongo_ok, redis_ok, qdrant_ok = await asyncio.gather(
-        postgres_task, mongo_task, redis_task, qdrant_task
+    """Runs live connectivity checks on all configured databases in parallel (Postgres, Mongo, Redis, Qdrant),
+    reporting connection status, round-trip latency, and server version for each."""
+    use_sqlite = await is_postgres_offline()
+
+    (postgres_ok, postgres_latency), (mongo_ok, mongo_latency), (redis_ok, redis_latency), (qdrant_ok, qdrant_latency) = await asyncio.gather(
+        _check_with_latency(verify_postgres),
+        _check_with_latency(verify_mongo),
+        _check_with_latency(verify_redis),
+        _check_with_latency(verify_qdrant),
     )
-    
+
+    postgres_version, mongo_version, redis_version = await asyncio.gather(
+        _postgres_version(use_sqlite), _mongo_version(), _redis_version()
+    )
+
     return {
-        "postgres": {"connected": postgres_ok},
-        "mongodb": {"connected": mongo_ok},
-        "redis": {"connected": redis_ok},
-        "qdrant": {"connected": qdrant_ok}
+        "postgres": {
+            "connected": postgres_ok,
+            "latency_ms": postgres_latency,
+            "version": postgres_version,
+            "engine": "SQLite (fallback)" if use_sqlite else "PostgreSQL",
+        },
+        "mongodb": {"connected": mongo_ok, "latency_ms": mongo_latency, "version": mongo_version},
+        "redis": {"connected": redis_ok, "latency_ms": redis_latency, "version": redis_version},
+        "qdrant": {"connected": qdrant_ok, "latency_ms": qdrant_latency, "version": "unknown"},
     }
 
 @router.get("/agents", response_model=Dict[str, Any])

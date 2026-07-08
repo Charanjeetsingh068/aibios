@@ -21,6 +21,20 @@ export interface SystemInfo {
 
 export interface DatabaseConnection {
   connected: boolean;
+  latency_ms?: number;
+  version?: string;
+  engine?: string;
+}
+
+export interface HealthStatus {
+  status: string;
+  environment: string;
+  backend: string;
+  cpu: { percent: number; cores: number };
+  memory: { percent: number; used_gb: number; total_gb: number };
+  disk: { percent: number; used_gb: number; total_gb: number };
+  workers: number;
+  dependencies: Record<string, string>;
 }
 
 export interface DatabaseStatus {
@@ -67,6 +81,14 @@ export async function fetchAgentStatus(): Promise<AgentStatus> {
   const res = await fetch(`${API_BASE}/agents`);
   if (!res.ok) {
     throw new Error(`Failed to fetch agent status: ${res.statusText}`);
+  }
+  return res.json();
+}
+
+export async function fetchHealth(): Promise<HealthStatus> {
+  const res = await fetch('/api/v1/health');
+  if (!res.ok) {
+    throw new Error(`Failed to fetch health status: ${res.statusText}`);
   }
   return res.json();
 }

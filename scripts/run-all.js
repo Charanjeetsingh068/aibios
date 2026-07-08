@@ -20,7 +20,7 @@ console.log('\x1b[36m%s\x1b[0m', '   AI-BOS Enterprise Console Orchestrator Serv
 console.log('\x1b[36m%s\x1b[0m', '==========================================================');
 
 // Resolve the Python executable inside the virtual environment
-let pythonExec = isWin ? 'venv\\Scripts\\python.exe' : 'venv/bin/python';
+let pythonExec = isWin ? '.venv\\Scripts\\python.exe' : '.venv/bin/python';
 const venvPythonPath = path.join(backendDir, pythonExec);
 
 if (fs.existsSync(venvPythonPath)) {

@@ -67,4 +67,28 @@ class Settings(BaseSettings):
     LANGCHAIN_TRACING_V2: str = "false"
     LANGCHAIN_API_KEY: Optional[str] = None
 
+    # Meta (Facebook / Instagram) Graph API
+    FACEBOOK_APP_ID: Optional[str] = None
+    FACEBOOK_APP_SECRET: Optional[str] = None
+    FACEBOOK_REDIRECT_URI: Optional[str] = None
+    FACEBOOK_WEBHOOK_VERIFY_TOKEN: Optional[str] = None
+
+    # WhatsApp Business Cloud API
+    WHATSAPP_APP_ID: Optional[str] = None
+    WHATSAPP_APP_SECRET: Optional[str] = None
+    WHATSAPP_PHONE_NUMBER_ID: Optional[str] = None
+    WHATSAPP_BUSINESS_ACCOUNT_ID: Optional[str] = None
+    WHATSAPP_ACCESS_TOKEN: Optional[str] = None
+    WHATSAPP_WEBHOOK_VERIFY_TOKEN: Optional[str] = None
+
+    # Google Sheets API
+    GOOGLE_SERVICE_ACCOUNT_JSON: Optional[str] = None
+    GOOGLE_SHEETS_SPREADSHEET_ID: Optional[str] = None
+
+    # AI Voice Providers
+    TWILIO_ACCOUNT_SID: Optional[str] = None
+    TWILIO_AUTH_TOKEN: Optional[str] = None
+    TWILIO_PHONE_NUMBER: Optional[str] = None
+    ELEVENLABS_API_KEY: Optional[str] = None
+
 settings = Settings()
