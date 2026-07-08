@@ -15,6 +15,7 @@ from sqlalchemy.orm import selectinload
 from app.core.config import settings
 from app.core.database import get_db, verify_postgres, verify_mongo, verify_redis, verify_qdrant
 from app.core import telemetry
+from app.core.email import send_email
 from app.core.security import get_password_hash
 from app.api.v1.endpoints.auth import get_current_user, RoleChecker
 from app.api.v1.endpoints.system import get_uptime
@@ -490,6 +491,13 @@ async def invite_user(
     await db.refresh(new_u)
 
     invite_link = f"{settings.FRONTEND_URL}/auth/reset-password?token={raw_invite_token}"
+    email_sent = await send_email(
+        to=new_u.email,
+        subject=f"You've been invited to {settings.PROJECT_NAME}",
+        body=f"{current_user.first_name} invited you to join their organization. Set your password to get started:\n\n{invite_link}\n\nThis link expires in 7 days.",
+    )
+    if not email_sent:
+        logger.warning(f"Invite email could not be sent to {new_u.email}; SMTP may not be configured.")
 
     return {
         "user": {
@@ -500,7 +508,8 @@ async def invite_user(
             "status": new_u.status,
             "role_id": new_u.role_id,
         },
-        "invite_link": invite_link
+        "invite_link": invite_link,
+        "email_sent": email_sent,
     }
 
 
@@ -584,7 +593,14 @@ async def reset_user_password(
     await db.commit()
 
     reset_link = f"{settings.FRONTEND_URL}/auth/reset-password?token={raw_token}"
-    return {"reset_link": reset_link}
+    email_sent = await send_email(
+        to=u.email,
+        subject=f"Your {settings.PROJECT_NAME} password was reset",
+        body=f"An administrator triggered a password reset for your account. Set a new password here (expires in 24 hours):\n\n{reset_link}",
+    )
+    if not email_sent:
+        logger.warning(f"Password reset email could not be sent to {u.email}; SMTP may not be configured.")
+    return {"reset_link": reset_link, "email_sent": email_sent}
 
 
 class RoleUpdateBody(BaseModel):

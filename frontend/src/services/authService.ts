@@ -56,6 +56,17 @@ export async function login(data: LoginRequest): Promise<TokenResponse> {
   }
 }
 
+export async function loginWithGoogleCode(code: string): Promise<TokenResponse> {
+  try {
+    const response = await axiosInstance.post('/oauth/callback/google', { code, state: 'google_popup' });
+    const tokenData: TokenResponse = response.data;
+    setTokens(tokenData);
+    return tokenData;
+  } catch (error: any) {
+    throw new Error(error.response?.data?.detail || 'Google sign-in failed. Please try again.');
+  }
+}
+
 export async function logout(): Promise<void> {
   try {
     await axiosInstance.post('/auth/logout');

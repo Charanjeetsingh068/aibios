@@ -1,18 +1,29 @@
 import logging
+import secrets
+from datetime import datetime
 from typing import Any, Dict
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel
 import httpx
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.core.config import settings
 from app.core.database import get_db
-from app.core.security import create_access_token
-from app.models.auth import User, Organization
+from app.core.security import get_password_hash
+from app.api.v1.endpoints.auth import issue_session_tokens
+from app.schemas.auth import TokenResponse
+from app.models.auth import User, Organization, LoginHistory
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+# Google Identity Services' "code client" popup flow (used by the login page — no page
+# redirect/new route involved) exchanges its authorization code with this literal,
+# protocol-defined redirect_uri value instead of a real URL. See:
+# https://developers.google.com/identity/oauth2/web/guides/use-code-model
+GOOGLE_POPUP_REDIRECT_URI = "postmessage"
 
 
 class OAuthCallbackPayload(BaseModel):
@@ -54,10 +65,11 @@ async def get_oauth_url(provider: str):
         raise HTTPException(status_code=400, detail=f"Unsupported OAuth provider: {provider}")
 
 
-@router.post("/callback/{provider}", response_model=Dict[str, Any])
+@router.post("/callback/{provider}", response_model=TokenResponse)
 async def oauth_callback(
     provider: str,
     payload: OAuthCallbackPayload,
+    request: Request,
     db: AsyncSession = Depends(get_db)
 ):
     """Exchanges authorization code for access tokens and registers/logs in the user."""
@@ -77,7 +89,7 @@ async def oauth_callback(
                         "code": payload.code,
                         "client_id": settings.GOOGLE_CLIENT_ID,
                         "client_secret": settings.GOOGLE_CLIENT_SECRET,
-                        "redirect_uri": f"{settings.FRONTEND_URL}/auth/callback/google",
+                        "redirect_uri": GOOGLE_POPUP_REDIRECT_URI,
                         "grant_type": "authorization_code"
                     }
                 )
@@ -167,7 +179,7 @@ async def oauth_callback(
         # identity and log the caller in anyway; that would be an authentication bypass.
         raise HTTPException(status_code=400, detail=f"{provider.capitalize()} authentication failed: could not verify identity.")
 
-    user_stmt = select(User).where(User.email == email)
+    user_stmt = select(User).where(User.email == email).options(selectinload(User.organization))
     user_res = await db.execute(user_stmt)
     user = user_res.scalar_one_or_none()
 
@@ -186,24 +198,36 @@ async def oauth_callback(
             first_name=first_name,
             last_name=last_name,
             email=email,
-            password_hash="OAUTH_EXTERNAL_USER",
+            password_hash=get_password_hash(secrets.token_urlsafe(32)),  # OAuth-only account, no usable password
             role_id="manager",
             status="active"
         )
         db.add(user)
         await db.commit()
         await db.refresh(user)
+        user.organization = org  # populate the relationship in-memory; avoids a second query
 
-    access_token = create_access_token(subject=user.id)
-    return {
-        "access_token": access_token,
-        "token_type": "bearer",
-        "user": {
-            "id": user.id,
-            "first_name": user.first_name,
-            "last_name": user.last_name,
-            "email": user.email,
-            "role": user.role_id,
-            "organization_id": user.organization_id
-        }
-    }
+    if user.status != "active":
+        raise HTTPException(status_code=403, detail="Your user account is deactivated")
+    if user.organization.status != "active":
+        raise HTTPException(status_code=403, detail="Your tenant organization is deactivated")
+
+    ip_address = request.client.host if request.client else None
+    device_info = request.headers.get("user-agent", "Unknown Device")
+
+    # Issue a full session + rotatable refresh token (same as password login) so token
+    # refresh and logout work identically regardless of how the user signed in.
+    token_response = await issue_session_tokens(db, user, ip_address, device_info, remember_me=True)
+
+    db.add(LoginHistory(
+        user_id=user.id,
+        organization_id=user.organization_id,
+        email=user.email,
+        status="success",
+        ip_address=ip_address,
+        device_info=f"{device_info} (OAuth: {provider})",
+    ))
+    user.last_login = datetime.utcnow()
+    await db.commit()
+
+    return token_response

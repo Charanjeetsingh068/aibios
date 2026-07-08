@@ -22,3 +22,16 @@ from app.models.business import (
     TokenUsageEvent,
 )
 from app.models.integrations import Integration
+from app.models.enterprise_integrations import (
+    IntegrationCredential,
+    MetaPage,
+    MetaLeadForm,
+    WhatsAppPhoneNumber,
+    WhatsAppMessageLog,
+    VoiceProviderCredential,
+    VoiceLibraryEntry,
+    CampaignVoiceAssignment,
+    N8nConnection,
+    N8nWorkflowMapping,
+    N8nExecutionLog,
+)

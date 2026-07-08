@@ -318,27 +318,42 @@ async def seed_database(session):
         {"id": "leads:read", "name": "Read Leads", "description": "Read leads metrics and profiles"},
         {"id": "leads:write", "name": "Write Leads", "description": "Create and edit lead profiles"},
         {"id": "agents:read", "name": "Read Agents", "description": "Read LangGraph agent statuses and nodes"},
-        {"id": "agents:write", "name": "Write Agents", "description": "Configure agent flows and tools"}
+        {"id": "agents:write", "name": "Write Agents", "description": "Configure agent flows and tools"},
+        # Enterprise Integration Layer — module-level
+        {"id": "integrations:read", "name": "Read Integrations", "description": "View integration connection status and health"},
+        {"id": "integrations:write", "name": "Write Integrations", "description": "Connect/disconnect integrations and manage their configuration"},
+        # Enterprise Integration Layer — per-integration
+        {"id": "integrations:meta:write", "name": "Manage Meta Integration", "description": "Connect/configure Facebook & Instagram Business integration"},
+        {"id": "integrations:whatsapp:write", "name": "Manage WhatsApp Integration", "description": "Connect/configure WhatsApp Business Cloud API"},
+        {"id": "integrations:voice:write", "name": "Manage Voice Integration", "description": "Connect/configure AI voice providers"},
+        {"id": "integrations:n8n:write", "name": "Manage n8n Integration", "description": "Connect/configure n8n workflow automation"},
+        # AI permissions
+        {"id": "ai:voice:read", "name": "Read AI Voice", "description": "View AI voice library and campaign voice assignments"},
+        {"id": "ai:voice:write", "name": "Write AI Voice", "description": "Manage AI voice library, uploads, and campaign assignments"},
     ]
-    
+
     for p in permissions_data:
         perm = await session.get(Permission, p["id"])
         if not perm:
             session.add(Permission(**p))
     await session.commit()
-    
+
     # 2. Seed Roles
     roles_data = [
         {"id": "super_admin", "name": "Super Admin", "description": "Global administrator control", "permissions": ["admin:all"]},
-        {"id": "org_admin", "name": "Organization Admin", "description": "Tenant administrator control", "permissions": ["org:read", "org:write", "leads:read", "leads:write", "agents:read", "agents:write"]},
-        {"id": "manager", "name": "Manager", "description": "Team lead manager", "permissions": ["leads:read", "leads:write", "agents:read"]},
+        {"id": "org_admin", "name": "Organization Admin", "description": "Tenant administrator control", "permissions": [
+            "org:read", "org:write", "leads:read", "leads:write", "agents:read", "agents:write",
+            "integrations:read", "integrations:write", "integrations:meta:write", "integrations:whatsapp:write",
+            "integrations:voice:write", "integrations:n8n:write", "ai:voice:read", "ai:voice:write",
+        ]},
+        {"id": "manager", "name": "Manager", "description": "Team lead manager", "permissions": ["leads:read", "leads:write", "agents:read", "integrations:read", "ai:voice:read"]},
         {"id": "sales_executive", "name": "Sales Executive", "description": "CRM executive worker", "permissions": ["leads:read", "leads:write"]},
         {"id": "ai_agent", "name": "AI Agent", "description": "Autonomous worker agent", "permissions": ["leads:read", "leads:write", "agents:read"]},
         {"id": "developer", "name": "Developer", "description": "Developer node configurer", "permissions": ["agents:read", "agents:write"]},
-        {"id": "auditor", "name": "Auditor", "description": "Security logs auditor", "permissions": ["leads:read", "agents:read"]},
+        {"id": "auditor", "name": "Auditor", "description": "Security logs auditor", "permissions": ["leads:read", "agents:read", "integrations:read"]},
         {"id": "viewer", "name": "Viewer", "description": "Read-only access", "permissions": ["leads:read"]}
     ]
-    
+
     for r in roles_data:
         role = await session.get(Role, r["id"])
         if not role:
@@ -348,6 +363,16 @@ async def seed_database(session):
                 if perm:
                     role_obj.permissions.append(perm)
             session.add(role_obj)
+        else:
+            # Existing deployments: union in any permissions newly added to this role's seed
+            # list above without ever removing permissions an admin may have added manually —
+            # otherwise permissions added here would never reach an already-seeded database.
+            existing_ids = {p.id for p in role.permissions}
+            for p_id in r["permissions"]:
+                if p_id not in existing_ids:
+                    perm = await session.get(Permission, p_id)
+                    if perm:
+                        role.permissions.append(perm)
     await session.commit()
     
     # 3. Seed Demo Organization

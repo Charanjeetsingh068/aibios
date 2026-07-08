@@ -37,6 +37,7 @@ export interface HealthStatus {
   disk: { percent: number; used_gb: number; total_gb: number };
   workers: number;
   dependencies: Record<string, string>;
+  integrations?: Record<string, { status: 'configured' | 'not_configured'; missing: string[] }>;
 }
 
 export interface DatabaseStatus {

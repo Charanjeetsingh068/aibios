@@ -75,6 +75,32 @@ def verify_twilio_signature(auth_token: Optional[str], full_url: str, params: Di
         return False
 
 
+def sign_hmac_sha256(secret: str, payload: bytes, prefix: str = "sha256=") -> str:
+    """Produces an HMAC-SHA256 signature header value for outbound webhook calls
+    (e.g. this server calling out to an n8n webhook), in the same `prefix=hexdigest`
+    shape Meta uses for X-Hub-Signature-256 — the paired counterpart to
+    verify_hmac_sha256_signature below, so callers can be verified with the same helper."""
+    digest = hmac.new(secret.encode("utf-8"), payload, hashlib.sha256).hexdigest()
+    return f"{prefix}{digest}"
+
+
+def verify_hmac_sha256_signature(secret: Optional[str], payload: bytes, signature_header: Optional[str], prefix: str = "sha256=") -> bool:
+    """Generic HMAC-SHA256 webhook signature verification for callers that don't follow
+    Meta's exact `X-Hub-Signature-256` conventions (e.g. n8n inbound callbacks signed with a
+    per-organization webhook_secret). Fails closed: returns False if the secret or header is
+    missing. Uses hmac.compare_digest to avoid timing attacks."""
+    if not secret or not signature_header:
+        return False
+    try:
+        if not signature_header.startswith(prefix):
+            return False
+        signature = signature_header[len(prefix):]
+        expected = hmac.new(secret.encode("utf-8"), payload, hashlib.sha256).hexdigest()
+        return hmac.compare_digest(expected, signature)
+    except Exception:
+        return False
+
+
 def get_security_headers(environment: str) -> dict[str, str]:
     """
     Returns security headers based on the active environment (development or production).

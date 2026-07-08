@@ -486,7 +486,7 @@ export default function Dashboard() {
   });
   const resetPasswordMutation = useMutation({
     mutationFn: apiResetUserPassword,
-    onSuccess: (res) => pushNotification(`Password reset link generated: ${res.reset_link}`),
+    onSuccess: (res) => pushNotification(res.email_sent ? 'Password reset email sent.' : `Reset link generated (email not sent — check SMTP config): ${res.reset_link}`),
     onError: (err: any) => pushNotification(err?.response?.data?.detail || 'Failed to generate reset link'),
   });
 

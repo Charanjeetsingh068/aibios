@@ -110,11 +110,30 @@ class Settings(BaseSettings):
     TWILIO_PHONE_NUMBER: Optional[str] = None
     TWILIO_SUPPORT_NUMBER: Optional[str] = None
     ELEVENLABS_API_KEY: Optional[str] = None
+    CARTESIA_API_KEY: Optional[str] = None
+    AZURE_SPEECH_KEY: Optional[str] = None
+    AZURE_SPEECH_REGION: Optional[str] = None
+    GOOGLE_TTS_API_KEY: Optional[str] = None
+
+    # Symmetric key (Fernet) used to encrypt OAuth tokens / API keys at rest. Generate with:
+    # python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+    ENCRYPTION_KEY: Optional[str] = None
+
+    # n8n Workflow Automation
+    N8N_DEFAULT_WEBHOOK_TIMEOUT_SECONDS: int = 15
 
     # S3 Object Storage Configuration
     AWS_ACCESS_KEY_ID: Optional[str] = None
     AWS_SECRET_ACCESS_KEY: Optional[str] = None
     AWS_STORAGE_BUCKET_NAME: Optional[str] = None
     AWS_S3_ENDPOINT_URL: Optional[str] = None
+
+    # SMTP / Transactional Email
+    SMTP_HOST: Optional[str] = None
+    SMTP_PORT: int = 587
+    SMTP_USER: Optional[str] = None
+    SMTP_PASSWORD: Optional[str] = None
+    SMTP_FROM_EMAIL: Optional[str] = None
+    SMTP_USE_TLS: bool = True
 
 settings = Settings()

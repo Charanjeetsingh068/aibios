@@ -1,4 +1,5 @@
 import os
+import re
 import logging
 from datetime import datetime
 from typing import Any, Dict, List
@@ -21,6 +22,15 @@ router = APIRouter()
 
 UPLOAD_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))), "uploads")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
+
+MAX_UPLOAD_SIZE_BYTES = 25 * 1024 * 1024  # 25 MB
+
+
+def _safe_content_disposition(filename: str) -> str:
+    """Strips characters that could break out of the header value (CR/LF/quotes) so a
+    malicious upload filename can't perform HTTP header/response-splitting injection."""
+    safe_name = re.sub(r'[\r\n"]', "", filename).strip() or "download"
+    return f'attachment; filename="{safe_name}"'
 
 
 def _get_s3_client():
@@ -73,7 +83,12 @@ async def upload_document(
 ):
     content = await file.read()
     size = len(content)
-    
+    if size > MAX_UPLOAD_SIZE_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"File exceeds maximum upload size of {MAX_UPLOAD_SIZE_BYTES // (1024*1024)} MB",
+        )
+
     doc = DocumentFile(
         organization_id=current_user.organization_id,
         name=file.filename or "Uploaded File",
@@ -122,20 +137,15 @@ async def download_document(
             return StreamingResponse(
                 res["Body"],
                 media_type=doc.file_type,
-                headers={"Content-Disposition": f"attachment; filename={doc.name}"}
+                headers={"Content-Disposition": _safe_content_disposition(doc.name)}
             )
         except Exception as e:
             logger.error(f"S3 download failed: {e}. Trying local fallback.")
 
     filepath = os.path.join(UPLOAD_DIR, f"{doc.id}")
     if not os.path.exists(filepath):
-        dummy_data = f"Document Preview Content\nName: {doc.name}\nSize: {doc.size_bytes} bytes".encode("utf-8")
-        return StreamingResponse(
-            io.BytesIO(dummy_data),
-            media_type=doc.file_type,
-            headers={"Content-Disposition": f"attachment; filename={doc.name}"}
-        )
-        
+        raise HTTPException(status_code=404, detail="Document content not found in storage")
+
     return FileResponse(
         filepath,
         media_type=doc.file_type,
@@ -182,7 +192,7 @@ async def preview_document(
         else:
             preview_text = f"[Non-Text Format] {doc.name} ({doc.size_bytes} bytes)"
     else:
-        preview_text = f"This is an interactive preview of document '{doc.name}'. File format matches {doc.file_type}."
+        preview_text = "[Content not found in storage]"
 
     return {
         "document": _serialize(doc),

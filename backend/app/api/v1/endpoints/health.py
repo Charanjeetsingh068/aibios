@@ -3,7 +3,9 @@ from typing import Any, Dict
 import asyncio
 import psutil
 from fastapi import APIRouter
+from app.core.config import settings
 from app.core.database import verify_postgres, verify_mongo, verify_redis, verify_qdrant
+from app.core.env_check import get_integration_statuses
 
 router = APIRouter()
 
@@ -38,7 +40,7 @@ async def health_check():
 
     return {
         "status": system_status,
-        "environment": "development",
+        "environment": settings.ENVIRONMENT,
         "backend": "online",
         "cpu": {
             "percent": cpu_percent,
@@ -60,5 +62,6 @@ async def health_check():
             "mongodb": "online" if mongo_status else "offline",
             "redis": "online" if redis_status else "offline",
             "qdrant_vector_db": "online" if qdrant_status else "offline",
-        }
+        },
+        "integrations": get_integration_statuses(),
     }

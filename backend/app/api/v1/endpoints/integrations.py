@@ -2,7 +2,7 @@ import json
 import logging
 import secrets
 from datetime import datetime
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional, Tuple
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -10,10 +10,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.security import verify_meta_signature
+from app.core.crypto import decrypt_value, CryptoNotConfiguredError
 from app.api.v1.endpoints.auth import get_current_user
 from app.models.auth import User
 from app.models.business import Lead
 from app.models.integrations import Integration
+from app.models.enterprise_integrations import MetaPage
+from app.services import meta_service
+from app.services.meta_service import MetaAPIError
+from app.services.n8n_service import dispatch_event
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -124,6 +129,28 @@ async def disconnect_integration(
     return _serialize(row, _missing_settings(channel))
 
 
+async def _resolve_org_for_page(db: AsyncSession, page_id: Optional[str]) -> Tuple[Optional[str], Optional[MetaPage]]:
+    """Resolves which organization owns a given Meta Page. Falls back to the first
+    organization in the system only when zero MetaPage rows exist anywhere (single-tenant
+    dev bootstrap, matching the previous behavior) — once any organization has connected a
+    real page, an unmapped page_id is logged and dropped rather than attributed to a
+    random org."""
+    if page_id:
+        result = await db.execute(select(MetaPage).where(MetaPage.page_id == page_id))
+        page_row = result.scalar_one_or_none()
+        if page_row:
+            return page_row.organization_id, page_row
+
+    any_pages = await db.execute(select(MetaPage.id).limit(1))
+    if any_pages.scalar_one_or_none() is not None:
+        return None, None
+
+    from app.models.auth import Organization
+    org_res = await db.execute(select(Organization).limit(1))
+    org = org_res.scalar_one_or_none()
+    return (org.id, None) if org else (None, None)
+
+
 @router.get("/meta/webhook")
 async def verify_meta_webhook(
     hub_mode: str = Query(None, alias="hub.mode"),
@@ -163,30 +190,53 @@ async def receive_meta_webhook(request: Request, db: AsyncSession = Depends(get_
                     leadgen_id = value.get("leadgen_id")
                     page_id = value.get("page_id")
 
-                    from app.models.auth import Organization
-                    org_stmt = select(Organization).limit(1)
-                    org_res = await db.execute(org_stmt)
-                    org = org_res.scalar_one_or_none()
-
-                    if org:
-                        # Meta's webhook payload only carries the leadgen_id/page_id — the actual
-                        # submitted form answers (name/phone/email) require a separate call to
-                        # the Lead Retrieval API with a page access token, which isn't configured
-                        # here. Record the lead as a real reference needing manual/API follow-up
-                        # rather than inventing contact details.
-                        lead = Lead(
-                            organization_id=org.id,
-                            name=f"Meta Lead {str(leadgen_id)[-6:] if leadgen_id else 'New'}",
-                            company=f"Page {page_id or 'Meta Partner'}",
-                            phone=None,
-                            email=None,
-                            source="facebook" if page_id else "instagram",
-                            status="pending",
-                            value=0.0
+                    org_id, page_row = await _resolve_org_for_page(db, page_id)
+                    if not org_id:
+                        logger.warning(
+                            f"Dropping Meta leadgen event for unmapped page_id={page_id} "
+                            f"(leadgen_id={leadgen_id}): no connected MetaPage found for it."
                         )
-                        db.add(lead)
-                        await db.commit()
-                        logger.info(f"Recorded Meta Leadgen event pending field retrieval: {leadgen_id}")
+                        continue
+
+                    # Retrieve the real submitted field answers (name/email/phone) using the
+                    # connected Page's own access token — the webhook payload itself only
+                    # carries the leadgen_id/page_id. Falls back to a placeholder name (fields
+                    # left null, never fabricated) if the page isn't fully connected yet or the
+                    # retrieval call fails.
+                    full_name = email = phone_number = None
+                    if page_row and page_row.page_access_token_encrypted and leadgen_id:
+                        try:
+                            page_token = decrypt_value(page_row.page_access_token_encrypted)
+                            lead_fields = await meta_service.retrieve_lead_data(leadgen_id, page_token)
+                            full_name = lead_fields.get("full_name")
+                            email = lead_fields.get("email")
+                            phone_number = lead_fields.get("phone_number")
+                        except (CryptoNotConfiguredError, ValueError) as e:
+                            logger.error(f"Cannot retrieve Meta lead field data (encryption not configured, or ENCRYPTION_KEY was rotated): {e}")
+                        except MetaAPIError as e:
+                            logger.error(f"Failed to retrieve lead field data for leadgen_id={leadgen_id}: {e}")
+
+                    lead = Lead(
+                        organization_id=org_id,
+                        name=full_name or f"Meta Lead {str(leadgen_id)[-6:] if leadgen_id else 'New'}",
+                        company=f"Page {page_id or 'Meta Partner'}",
+                        phone=phone_number,
+                        email=email,
+                        source="facebook" if page_id else "instagram",
+                        status="new" if (email or phone_number) else "pending",
+                        value=0.0
+                    )
+                    db.add(lead)
+                    await db.commit()
+                    logger.info(
+                        f"Recorded Meta Leadgen event: {leadgen_id} (org={org_id}, "
+                        f"fields_retrieved={bool(email or phone_number)})"
+                    )
+
+                    await dispatch_event(db, org_id, "lead.created", {
+                        "lead_id": lead.id, "name": lead.name, "email": lead.email,
+                        "phone": lead.phone, "source": lead.source,
+                    })
     except HTTPException:
         raise
     except Exception as e:

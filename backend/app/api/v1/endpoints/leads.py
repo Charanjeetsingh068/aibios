@@ -12,6 +12,7 @@ from app.api.v1.endpoints.auth import get_current_user
 from app.models.auth import User
 from app.models.business import Lead
 from app.schemas.leads import LeadCreate, LeadUpdate, LeadEventCreate, VALID_SOURCES, VALID_STATUSES
+from app.services.n8n_service import dispatch_event
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -135,6 +136,9 @@ async def create_lead(
 
     await _record_mongo_lead(lead)
     await _record_lead_event(lead.id, lead.organization_id, "created", f"Lead created via {lead.source}", current_user.id)
+    await dispatch_event(db, lead.organization_id, "lead.created", {
+        "lead_id": lead.id, "name": lead.name, "email": lead.email, "phone": lead.phone, "source": lead.source,
+    })
 
     payload = _serialize(lead)
     await emit_to_organization(lead.organization_id, "lead:new", payload)

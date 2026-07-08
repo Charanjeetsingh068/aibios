@@ -10,11 +10,12 @@ from app.core.config import settings
 from app.core.security import get_security_headers
 from app.core import telemetry
 from app.core.realtime import sio
-from app.api.v1.endpoints import health, system, auth, dashboard, leads, deals, integrations, workflows, kb, documents, voice, reports, billing, oauth, whatsapp, twilio_integration
+from app.api.v1.endpoints import health, system, auth, dashboard, leads, deals, integrations, workflows, kb, documents, voice, reports, billing, oauth, whatsapp, twilio_integration, ai, meta_integration, voice_providers, integration_manager, n8n
 from app.core.database import is_postgres_offline, sqlite_engine, postgres_engine, seed_database, SqliteSessionLocal, AsyncSessionLocal, init_mongo_indexes
 from app.models.auth import Base
 from app.models import business as _business_models  # noqa: F401 ensures tables register on Base.metadata
 from app.models import integrations as _integrations_models  # noqa: F401 ensures tables register on Base.metadata
+from app.models import enterprise_integrations as _enterprise_integrations_models  # noqa: F401 ensures tables register on Base.metadata
 
 # Setup logger
 logging.basicConfig(
@@ -26,6 +27,9 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    from app.core.env_check import validate_environment_on_startup
+    validate_environment_on_startup()
+
     # Startup: Run schema migrations and seed data
     logger.info("Initializing relational database schema...")
     use_sqlite = await is_postgres_offline()
@@ -135,15 +139,20 @@ fastapi_app.include_router(dashboard.router, prefix=settings.API_V1_STR + "/dash
 fastapi_app.include_router(leads.router, prefix=settings.API_V1_STR + "/leads", tags=["Leads"])
 fastapi_app.include_router(deals.router, prefix=settings.API_V1_STR + "/deals", tags=["Deals / Pipeline"])
 fastapi_app.include_router(integrations.router, prefix=settings.API_V1_STR + "/integrations", tags=["Integrations"])
+fastapi_app.include_router(meta_integration.router, prefix=settings.API_V1_STR + "/integrations/meta", tags=["Meta Platform Integration"])
+fastapi_app.include_router(integration_manager.router, prefix=settings.API_V1_STR + "/integrations/manager", tags=["Integration Manager"])
+fastapi_app.include_router(n8n.router, prefix=settings.API_V1_STR + "/n8n", tags=["n8n Workflow Automation"])
 fastapi_app.include_router(workflows.router, prefix=settings.API_V1_STR + "/workflows", tags=["Workflows / Automations"])
 fastapi_app.include_router(kb.router, prefix=settings.API_V1_STR + "/kb", tags=["Knowledge Base"])
 fastapi_app.include_router(documents.router, prefix=settings.API_V1_STR + "/documents", tags=["Documents"])
 fastapi_app.include_router(voice.router, prefix=settings.API_V1_STR + "/voice", tags=["AI Voice"])
+fastapi_app.include_router(voice_providers.router, prefix=settings.API_V1_STR + "/voice", tags=["AI Voice Platform"])
 fastapi_app.include_router(reports.router, prefix=settings.API_V1_STR + "/reports", tags=["Reports"])
 fastapi_app.include_router(billing.router, prefix=settings.API_V1_STR + "/billing", tags=["Billing"])
 fastapi_app.include_router(oauth.router, prefix=settings.API_V1_STR + "/oauth", tags=["OAuth Authentication"])
 fastapi_app.include_router(whatsapp.router, prefix=settings.API_V1_STR + "/whatsapp", tags=["WhatsApp Platform"])
 fastapi_app.include_router(twilio_integration.router, prefix=settings.API_V1_STR + "/twilio", tags=["Twilio Platform"])
+fastapi_app.include_router(ai.router, prefix=settings.API_V1_STR + "/ai", tags=["AI / OpenAI"])
 
 @fastapi_app.get("/")
 async def root():

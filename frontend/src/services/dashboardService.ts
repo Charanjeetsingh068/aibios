@@ -205,7 +205,7 @@ export async function updateOrganizationDetails(data: any): Promise<Organization
   return response.data;
 }
 
-export async function inviteUser(data: { name: string; email: string; role: string; permissions: string[] }): Promise<{ user: DashboardUser; invite_link: string }> {
+export async function inviteUser(data: { name: string; email: string; role: string; permissions: string[] }): Promise<{ user: DashboardUser; invite_link: string; email_sent: boolean }> {
   const response = await axiosInstance.post('/dashboard/users/invite', data);
   return response.data;
 }
@@ -220,7 +220,7 @@ export async function deleteDashboardUser(userId: string): Promise<{ success: bo
   return response.data;
 }
 
-export async function resetUserPassword(userId: string): Promise<{ reset_link: string }> {
+export async function resetUserPassword(userId: string): Promise<{ reset_link: string; email_sent: boolean }> {
   const response = await axiosInstance.post(`/dashboard/users/${userId}/reset-password`);
   return response.data;
 }

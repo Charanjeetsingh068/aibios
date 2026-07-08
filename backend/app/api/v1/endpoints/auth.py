@@ -2,7 +2,7 @@ import logging
 import secrets
 import uuid
 from datetime import datetime, timedelta
-from typing import Any
+from typing import Any, Dict, Optional
 from fastapi import APIRouter, Depends, HTTPException, status, Request
 from fastapi.security import OAuth2PasswordBearer
 from jose import jwt, JWTError
@@ -12,10 +12,10 @@ from sqlalchemy.orm import selectinload
 
 from app.core.config import settings
 from app.core.database import get_db
+from app.core.email import send_email
 from app.core.security import (
     verify_password,
     get_password_hash,
-    create_access_token,
     oauth2_scheme
 )
 from app.models.auth import (
@@ -117,6 +117,68 @@ class RoleChecker:
         )
 
 # ------------------------------------------------------------------------------
+# Shared session/token issuance — used by password login and OAuth login so every
+# authentication method produces the same session, refresh-token rotation, and RBAC
+# claims (a bare create_access_token() call with no session was previously used for
+# OAuth logins, which meant refresh/logout never worked for those users).
+# ------------------------------------------------------------------------------
+async def issue_session_tokens(
+    db: AsyncSession,
+    user: User,
+    ip_address: Optional[str],
+    device_info: str,
+    remember_me: bool = False,
+) -> TokenResponse:
+    session_expiry = datetime.utcnow() + timedelta(days=30 if remember_me else 1)
+    access_token_id = str(uuid.uuid4())
+
+    session = UserSession(
+        user_id=user.id,
+        organization_id=user.organization_id,
+        access_token_id=access_token_id,
+        device_info=device_info,
+        ip_address=ip_address,
+        is_active=True,
+        expires_at=session_expiry
+    )
+    db.add(session)
+    await db.flush()  # populate session ID
+
+    access_token_payload = {
+        "sub": user.id,
+        "org_id": user.organization_id,
+        "roles": [user.role_id],
+        "sid": session.id,
+        "token_id": access_token_id
+    }
+    access_token_expiry = timedelta(minutes=60)
+    access_token = jwt.encode(
+        {**access_token_payload, "exp": datetime.utcnow() + access_token_expiry},
+        settings.SECRET_KEY,
+        algorithm="HS256"
+    )
+
+    raw_refresh_token = secrets.token_hex(32)
+    refresh_token_hash = get_password_hash(raw_refresh_token)
+    refresh_token_obj = RefreshToken(
+        session_id=session.id,
+        token_hash=refresh_token_hash,
+        expires_at=datetime.utcnow() + timedelta(days=30),
+        is_revoked=False
+    )
+    db.add(refresh_token_obj)
+
+    return TokenResponse(
+        access_token=access_token,
+        expires_in=3600,
+        refresh_token=raw_refresh_token,
+        user_id=user.id,
+        organization_id=user.organization_id,
+        role=user.role_id
+    )
+
+
+# ------------------------------------------------------------------------------
 # AUTH ROUTES
 # ------------------------------------------------------------------------------
 
@@ -184,55 +246,8 @@ async def login(
             detail="Your tenant organization is deactivated"
         )
 
-    # 3. Create Session
-    session_expiry = datetime.utcnow() + timedelta(days=30 if login_data.remember_me else 1)
-    access_token_id = str(uuid.uuid4())
-    
-    session = UserSession(
-        user_id=user.id,
-        organization_id=user.organization_id,
-        access_token_id=access_token_id,
-        device_info=device_info,
-        ip_address=ip_address,
-        is_active=True,
-        expires_at=session_expiry
-    )
-    db.add(session)
-    await db.flush()  # populate session ID
-
-    # 4. Generate Tokens
-    access_token_payload = {
-        "sub": user.id,
-        "org_id": user.organization_id,
-        "roles": [user.role_id],
-        "sid": session.id,
-        "token_id": access_token_id
-    }
-    
-    # Expires in 1 hour
-    access_token_expiry = timedelta(minutes=60)
-    access_token = create_access_token(
-        subject=user.id,
-        expires_delta=access_token_expiry
-    )
-    # Re-encode JWT containing full roles claims to assist client routing gates
-    access_token = jwt.encode(
-        {**access_token_payload, "exp": datetime.utcnow() + access_token_expiry},
-        settings.SECRET_KEY,
-        algorithm="HS256"
-    )
-
-    # Refresh token rotation hash
-    raw_refresh_token = secrets.token_hex(32)
-    refresh_token_hash = get_password_hash(raw_refresh_token)
-    
-    refresh_token_obj = RefreshToken(
-        session_id=session.id,
-        token_hash=refresh_token_hash,
-        expires_at=datetime.utcnow() + timedelta(days=30),
-        is_revoked=False
-    )
-    db.add(refresh_token_obj)
+    # 3. Issue session + tokens (shared with OAuth login)
+    token_response = await issue_session_tokens(db, user, ip_address, device_info, login_data.remember_me)
 
     # Log successful login
     history = LoginHistory(
@@ -249,14 +264,7 @@ async def login(
     user.last_login = datetime.utcnow()
     await db.commit()
 
-    return TokenResponse(
-        access_token=access_token,
-        expires_in=3600,
-        refresh_token=raw_refresh_token,
-        user_id=user.id,
-        organization_id=user.organization_id,
-        role=user.role_id
-    )
+    return token_response
 
 @router.post("/logout")
 async def logout(
@@ -394,10 +402,23 @@ async def forgot_password(
     db.add(audit)
     await db.commit()
 
-    # Note: In production we dispatch via SMTP; for local E2E verification we log it to standard stdout.
-    logger.info(f"== LOCAL RESET PASSWORD URL (DEVELOPMENT ONLY): {settings.FRONTEND_URL}/auth/reset-password?token={raw_token} ==")
+    reset_link = f"{settings.FRONTEND_URL}/auth/reset-password?token={raw_token}"
+    email_sent = await send_email(
+        to=user.email,
+        subject="Reset your AI-BOS password",
+        body=f"Click the link below to reset your password. This link expires in 2 hours.\n\n{reset_link}",
+    )
+    if not email_sent:
+        logger.warning(f"Password reset email could not be sent to {user.email}; SMTP may not be configured.")
 
-    return {"message": "If the email is registered, a password reset link has been dispatched", "token_dev_only": raw_token}
+    response: Dict[str, Any] = {"message": "If the email is registered, a password reset link has been dispatched"}
+    if settings.ENVIRONMENT == "development":
+        # Convenience only for local development — never expose the raw token in production,
+        # since anyone who can call this endpoint for a known email would otherwise be able to
+        # take over that account without ever receiving the email.
+        logger.info(f"== LOCAL RESET PASSWORD URL (DEVELOPMENT ONLY): {reset_link} ==")
+        response["token_dev_only"] = raw_token
+    return response
 
 @router.post("/reset-password")
 async def reset_password(

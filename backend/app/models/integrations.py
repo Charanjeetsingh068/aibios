@@ -16,5 +16,7 @@ class Integration(Base):
     external_account_id: Mapped[Optional[str]] = mapped_column(String(150), nullable=True)
     detail: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
     connected_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    token_expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    last_synced_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
