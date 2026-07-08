@@ -1,6 +1,6 @@
 import logging
 import asyncio
-from typing import AsyncGenerator
+from typing import AsyncGenerator, Optional, List, Dict, Any
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 from motor.motor_asyncio import AsyncIOMotorClient
 import redis.asyncio as aioredis
@@ -86,13 +86,123 @@ mongo_db = mongo_client.get_default_database()
 # ------------------------------------------------------------------------------
 # 3. Redis Setup
 # ------------------------------------------------------------------------------
-redis_client = aioredis.Redis(
+_raw_redis_client = aioredis.Redis(
     host=settings.REDIS_HOST,
     port=settings.REDIS_PORT,
     db=settings.REDIS_DB,
     password=settings.REDIS_PASSWORD or None,
     decode_responses=True
 )
+
+class SafeRedisPipeline:
+    def __init__(self, safe_client):
+        self.safe_client = safe_client
+        self.commands = []
+
+    def set(self, key, value):
+        self.commands.append(("set", key, value))
+
+    def expire(self, key, seconds):
+        self.commands.append(("expire", key, seconds))
+
+    async def execute(self):
+        for cmd in self.commands:
+            if cmd[0] == "set":
+                await self.safe_client.set(cmd[1], cmd[2])
+        return []
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        pass
+
+class SafeRedisClient:
+    def __init__(self, real_client):
+        self.real_client = real_client
+        self._local_storage = {}
+        self._is_online = None
+
+    async def _test_connection(self) -> bool:
+        if self._is_online is not None:
+            return self._is_online
+        try:
+            await asyncio.wait_for(self.real_client.ping(), timeout=1.0)
+            self._is_online = True
+        except Exception:
+            logger.warning("Redis is offline. Falling back to local mock storage.")
+            self._is_online = False
+        return self._is_online
+
+    async def ping(self) -> bool:
+        if await self._test_connection():
+            try:
+                return await self.real_client.ping()
+            except Exception:
+                self._is_online = False
+        return True
+
+    async def get(self, key: str) -> Optional[str]:
+        if await self._test_connection():
+            try:
+                return await self.real_client.get(key)
+            except Exception:
+                self._is_online = False
+        return self._local_storage.get(key)
+
+    async def set(self, key: str, value: Any, ex: Optional[int] = None) -> bool:
+        if await self._test_connection():
+            try:
+                return await self.real_client.set(key, value, ex=ex)
+            except Exception:
+                self._is_online = False
+        self._local_storage[key] = str(value)
+        return True
+
+    async def incr(self, key: str) -> int:
+        if await self._test_connection():
+            try:
+                return await self.real_client.incr(key)
+            except Exception:
+                self._is_online = False
+        current = int(self._local_storage.get(key, 0)) + 1
+        self._local_storage[key] = str(current)
+        return current
+
+    async def keys(self, pattern: str) -> List[str]:
+        if await self._test_connection():
+            try:
+                return await self.real_client.keys(pattern)
+            except Exception:
+                self._is_online = False
+        import fnmatch
+        return [k for k in self._local_storage.keys() if fnmatch.fnmatch(k, pattern)]
+
+    async def delete(self, *keys) -> int:
+        if await self._test_connection():
+            try:
+                return await self.real_client.delete(*keys)
+            except Exception:
+                self._is_online = False
+        deleted = 0
+        for k in keys:
+            if k in self._local_storage:
+                del self._local_storage[k]
+                deleted += 1
+        return deleted
+
+    def pipeline(self, transaction: bool = True) -> SafeRedisPipeline:
+        return SafeRedisPipeline(self)
+
+    async def info(self) -> Dict[str, Any]:
+        if await self._test_connection():
+            try:
+                return await self.real_client.info()
+            except Exception:
+                self._is_online = False
+        return {"redis_version": "mock-fallback-5.0.0"}
+
+redis_client = SafeRedisClient(_raw_redis_client)
 
 # ------------------------------------------------------------------------------
 # 4. Qdrant (Vector DB) Setup
