@@ -1,3 +1,5 @@
+import axiosInstance from './axiosInstance';
+
 export interface SystemStatus {
   backend: string;
   version: string;
@@ -51,44 +53,27 @@ export interface AgentStatus {
   developer_agent: string;
 }
 
-const API_BASE = '/api/v1/system';
-
 export async function fetchSystemStatus(): Promise<SystemStatus> {
-  const res = await fetch(`${API_BASE}/status`);
-  if (!res.ok) {
-    throw new Error(`Failed to fetch system status: ${res.statusText}`);
-  }
-  return res.json();
+  const response = await axiosInstance.get('/system/status');
+  return response.data;
 }
 
 export async function fetchSystemInfo(): Promise<SystemInfo> {
-  const res = await fetch(`${API_BASE}/info`);
-  if (!res.ok) {
-    throw new Error(`Failed to fetch system info: ${res.statusText}`);
-  }
-  return res.json();
+  const response = await axiosInstance.get('/system/info');
+  return response.data;
 }
 
 export async function fetchDatabaseStatus(): Promise<DatabaseStatus> {
-  const res = await fetch(`${API_BASE}/database`);
-  if (!res.ok) {
-    throw new Error(`Failed to fetch database status: ${res.statusText}`);
-  }
-  return res.json();
+  const response = await axiosInstance.get('/system/database');
+  return response.data;
 }
 
 export async function fetchAgentStatus(): Promise<AgentStatus> {
-  const res = await fetch(`${API_BASE}/agents`);
-  if (!res.ok) {
-    throw new Error(`Failed to fetch agent status: ${res.statusText}`);
-  }
-  return res.json();
+  const response = await axiosInstance.get('/system/agents');
+  return response.data;
 }
 
 export async function fetchHealth(): Promise<HealthStatus> {
-  const res = await fetch('/api/v1/health');
-  if (!res.ok) {
-    throw new Error(`Failed to fetch health status: ${res.statusText}`);
-  }
-  return res.json();
+  const response = await axiosInstance.get('/health');
+  return response.data;
 }

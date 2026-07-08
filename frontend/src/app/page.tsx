@@ -15,8 +15,8 @@ import {
 import '../styles/dashboard.css';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
-  fetchSystemStatus, fetchSystemInfo, fetchDatabaseStatus, fetchAgentStatus,
-  SystemStatus, SystemInfo, DatabaseStatus, AgentStatus
+  fetchSystemStatus, fetchSystemInfo, fetchDatabaseStatus, fetchAgentStatus, fetchHealth,
+  SystemStatus, SystemInfo, DatabaseStatus, AgentStatus, HealthStatus
 } from '../services/systemService';
 import {
   fetchDashboardMetrics, fetchDashboardUsers, fetchDashboardRoles,
@@ -27,7 +27,7 @@ import {
   fetchMeetings as apiFetchMeetings, createMeeting as apiCreateMeeting, deleteMeeting as apiDeleteMeeting,
   DashboardMetrics, DashboardUser, DashboardRole, OrganizationDetails, AuditLogEntry,
 } from '../services/dashboardService';
-import { fetchLeads, createLead as apiCreateLead, updateLead as apiUpdateLead, deleteLead as apiDeleteLead, fetchLeadEvents, Lead } from '../services/leadsService';
+import { fetchLeads, createLead as apiCreateLead, updateLead as apiUpdateLead, deleteLead as apiDeleteLead, fetchLeadEvents, addLeadEvent as apiAddLeadEvent, Lead } from '../services/leadsService';
 import { fetchDeals, createDeal as apiCreateDeal, updateDeal as apiUpdateDeal, Deal } from '../services/dealsService';
 import { fetchIntegrations, connectIntegration as apiConnectIntegration } from '../services/integrationsService';
 import { useRealtimeSocket } from '../hooks/useRealtimeSocket';
@@ -176,6 +176,7 @@ export default function Dashboard() {
   const [info, setInfo] = useState<SystemInfo | null>(null);
   const [dbStatus, setDbStatus] = useState<DatabaseStatus | null>(null);
   const [agents, setAgents] = useState<AgentStatus | null>(null);
+  const [healthData, setHealthData] = useState<HealthStatus | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isError, setIsError] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
@@ -196,11 +197,21 @@ export default function Dashboard() {
 
   // ── Leads filter ──
   const [leadsFilter, setLeadsFilter] = useState('all');
+  const [leadsSearch, setLeadsSearch] = useState('');
+  const [debouncedLeadsSearch, setDebouncedLeadsSearch] = useState('');
   const [userSearch, setUserSearch] = useState('');
   const [showAddLead, setShowAddLead] = useState(false);
   const [newLead, setNewLead] = useState({ name: '', company: '', phone: '', source: 'manual', value: '' });
   const [expandedLeadId, setExpandedLeadId] = useState<string | null>(null);
   const [leadEvents, setLeadEvents] = useState<Record<string, any[]>>({});
+  const [newNoteText, setNewNoteText] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    const handler = setTimeout(() => {
+      setDebouncedLeadsSearch(leadsSearch);
+    }, 300);
+    return () => clearTimeout(handler);
+  }, [leadsSearch]);
 
   // ── Pipeline / deals ──
   const [showAddDeal, setShowAddDeal] = useState(false);
@@ -220,7 +231,10 @@ export default function Dashboard() {
   const overviewQuery = useQuery({ queryKey: ['overview'], queryFn: fetchDashboardOverview, refetchInterval: 30000 });
   const overview = overviewQuery.data;
 
-  const leadsQuery = useQuery({ queryKey: ['leads'], queryFn: () => fetchLeads() });
+  const leadsQuery = useQuery({
+    queryKey: ['leads', debouncedLeadsSearch],
+    queryFn: () => fetchLeads({ search: debouncedLeadsSearch || undefined })
+  });
   const leads: Lead[] = leadsQuery.data?.leads ?? [];
 
   const dealsQuery = useQuery({ queryKey: ['deals'], queryFn: fetchDeals });
@@ -333,15 +347,15 @@ export default function Dashboard() {
     try {
       setIsError(false);
       if (!status || isError) setIsLoading(true);
-      const [s, i, db, ag] = await Promise.all([
-        fetchSystemStatus(), fetchSystemInfo(), fetchDatabaseStatus(), fetchAgentStatus(),
+      const [s, i, db, ag, h] = await Promise.all([
+        fetchSystemStatus(), fetchSystemInfo(), fetchDatabaseStatus(), fetchAgentStatus(), fetchHealth(),
       ]);
-      setStatus(s); setInfo(i); setDbStatus(db); setAgents(ag);
+      setStatus(s); setInfo(i); setDbStatus(db); setAgents(ag); setHealthData(h);
       setIsError(false);
     } catch (err: any) {
       setIsError(true);
       setErrorMessage(err?.message || 'Could not connect to FastAPI backend.');
-      setStatus(null); setInfo(null); setDbStatus(null); setAgents(null);
+      setStatus(null); setInfo(null); setDbStatus(null); setAgents(null); setHealthData(null);
     } finally {
       setIsLoading(false);
     }
@@ -415,12 +429,37 @@ export default function Dashboard() {
     }
   };
 
+  const handleAddNote = async (leadId: string) => {
+    const text = newNoteText[leadId]?.trim();
+    if (!text) return;
+    try {
+      await apiAddLeadEvent(leadId, 'note', text);
+      setNewNoteText(prev => ({ ...prev, [leadId]: '' }));
+      const { events } = await fetchLeadEvents(leadId);
+      setLeadEvents(prev => ({ ...prev, [leadId]: events }));
+    } catch (err: any) {
+      pushNotification(`Failed to add note: ${err.message}`);
+    }
+  };
+
   const addDeal = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newDeal.name.trim()) return;
     createDealMutation.mutate({ name: newDeal.name.trim(), company: newDeal.company || undefined, value: newDeal.value ? Number(newDeal.value) : 0 });
   };
   const moveDealStage = (id: string, stage: string) => updateDealMutation.mutate({ id, data: { stage } });
+
+  const handleDragStart = (e: React.DragEvent, dealId: string) => {
+    e.dataTransfer.setData('text/plain', dealId);
+  };
+
+  const handleDrop = (e: React.DragEvent, targetStage: string) => {
+    e.preventDefault();
+    const dealId = e.dataTransfer.getData('text/plain');
+    if (dealId) {
+      updateDealMutation.mutate({ id: dealId, data: { stage: targetStage } });
+    }
+  };
 
   const addCampaign = (e: React.FormEvent) => {
     e.preventDefault();
@@ -781,18 +820,24 @@ export default function Dashboard() {
       </div>
 
       <div className="card">
-        <div className="filter-tabs">
-          {[
-            { id: 'all', label: 'All Leads', count: leads.length },
-            { id: 'new', label: 'New', count: countBy('new') },
-            { id: 'qualified', label: 'Qualified', count: countBy('qualified') },
-            { id: 'pending', label: 'Pending', count: countBy('pending') },
-            { id: 'spam', label: 'Spam', count: countBy('spam') },
-          ].map(tab => (
-            <button key={tab.id} className={`filter-tab-btn ${leadsFilter === tab.id ? 'active' : ''}`} onClick={() => setLeadsFilter(tab.id)}>
-              {tab.label}<span className="filter-tab-badge">{tab.count}</span>
-            </button>
-          ))}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--space-4)', flexWrap: 'wrap', gap: 12 }}>
+          <div className="filter-tabs" style={{ marginBottom: 0 }}>
+            {[
+              { id: 'all', label: 'All Leads', count: leads.length },
+              { id: 'new', label: 'New', count: countBy('new') },
+              { id: 'qualified', label: 'Qualified', count: countBy('qualified') },
+              { id: 'pending', label: 'Pending', count: countBy('pending') },
+              { id: 'spam', label: 'Spam', count: countBy('spam') },
+            ].map(tab => (
+              <button key={tab.id} className={`filter-tab-btn ${leadsFilter === tab.id ? 'active' : ''}`} onClick={() => setLeadsFilter(tab.id)}>
+                {tab.label}<span className="filter-tab-badge">{tab.count}</span>
+              </button>
+            ))}
+          </div>
+          <div className="search-input-wrapper">
+            <Search size={14} className="search-input-icon" />
+            <input className="search-input" placeholder="Search leads..." value={leadsSearch} onChange={e => setLeadsSearch(e.target.value)} style={{ width: 200 }} />
+          </div>
         </div>
 
         <div className="data-table-wrapper">
@@ -841,6 +886,22 @@ export default function Dashboard() {
                                 <span style={{ color: 'var(--text-tertiary)', marginLeft: 'auto' }}>{ev.created_at ? new Date(ev.created_at).toLocaleString() : ''}</span>
                               </div>
                             ))}
+                          </div>
+                          <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+                            <input
+                              placeholder="Type a note..."
+                              className="task-input-field"
+                              style={{ flexGrow: 1 }}
+                              value={newNoteText[lead.id] || ''}
+                              onChange={e => setNewNoteText(prev => ({ ...prev, [lead.id]: e.target.value }))}
+                            />
+                            <button
+                              className="btn-primary"
+                              style={{ padding: '6px 12px', fontSize: 'var(--font-xs)' }}
+                              onClick={() => handleAddNote(lead.id)}
+                            >
+                              Add Note
+                            </button>
                           </div>
                         </div>
                       </td>
@@ -905,7 +966,12 @@ export default function Dashboard() {
           {PIPELINE_STAGE_CONFIG.map(stage => {
             const stageDeals = deals.filter(d => d.stage === stage.id);
             return (
-              <div key={stage.id} className="kanban-column">
+              <div
+                key={stage.id}
+                className="kanban-column"
+                onDragOver={(e) => e.preventDefault()}
+                onDrop={(e) => handleDrop(e, stage.id)}
+              >
                 <div className="kanban-col-header">
                   <span className="kanban-col-title" style={{ color: stage.color }}>{stage.label}</span>
                   <span className="kanban-col-count">{stageDeals.length}</span>
@@ -913,7 +979,12 @@ export default function Dashboard() {
                 {stageDeals.map(deal => {
                   const next = nextStage(deal.stage);
                   return (
-                    <div key={deal.id} className="kanban-deal-card">
+                    <div
+                      key={deal.id}
+                      className="kanban-deal-card"
+                      draggable={true}
+                      onDragStart={(e) => handleDragStart(e, deal.id)}
+                    >
                       <div className="kanban-deal-name">{deal.name}</div>
                       <div className="kanban-deal-company">{deal.company}</div>
                       <div className="kanban-deal-value">${deal.value.toLocaleString()}</div>
@@ -1548,15 +1619,24 @@ workflow.add_conditional_edges(
 
         <div className="health-stat-card">
           <div className="health-stat-title">CPU</div>
-          <div className="health-stat-value">{info?.cpu_count ?? metrics?.cpu_count ?? 0} Cores</div>
-          <div style={{ fontSize: 'var(--font-xs)', color: 'var(--text-tertiary)' }}>{info?.platform ?? metrics?.platform ?? 'N/A'}</div>
-          <div className="health-stat-bar-bg"><div className="health-stat-bar-fill good" style={{ width: '42%' }}></div></div>
+          <div className="health-stat-value">{healthData?.cpu?.percent ?? 0}%</div>
+          <div style={{ fontSize: 'var(--font-xs)', color: 'var(--text-tertiary)' }}>{info?.cpu_count ?? metrics?.cpu_count ?? 0} Cores · {info?.platform ?? metrics?.platform ?? 'N/A'}</div>
+          <div className="health-stat-bar-bg"><div className="health-stat-bar-fill good" style={{ width: `${healthData?.cpu?.percent ?? 0}%` }}></div></div>
         </div>
 
         <div className="health-stat-card">
           <div className="health-stat-title">Memory</div>
-          <div className="health-stat-value">{info?.memory ?? 'N/A'}</div>
-          <div className="health-stat-bar-bg"><div className="health-stat-bar-fill warn" style={{ width: '68%' }}></div></div>
+          {/* info?.memory */}
+          <div className="health-stat-value">{healthData?.memory?.percent ?? 0}%</div>
+          <div style={{ fontSize: 'var(--font-xs)', color: 'var(--text-tertiary)' }}>{healthData?.memory?.used_gb ?? 0} GB / {healthData?.memory?.total_gb ?? 0} GB used</div>
+          <div className="health-stat-bar-bg"><div className={`health-stat-bar-fill ${(healthData?.memory?.percent ?? 0) < 70 ? 'good' : (healthData?.memory?.percent ?? 0) < 90 ? 'warn' : 'bad'}`} style={{ width: `${healthData?.memory?.percent ?? 0}%` }}></div></div>
+        </div>
+
+        <div className="health-stat-card">
+          <div className="health-stat-title">Disk Storage</div>
+          <div className="health-stat-value">{healthData?.disk?.percent ?? 0}%</div>
+          <div style={{ fontSize: 'var(--font-xs)', color: 'var(--text-tertiary)' }}>{healthData?.disk?.used_gb ?? 0} GB / {healthData?.disk?.total_gb ?? 0} GB used</div>
+          <div className="health-stat-bar-bg"><div className={`health-stat-bar-fill ${(healthData?.disk?.percent ?? 0) < 70 ? 'good' : (healthData?.disk?.percent ?? 0) < 90 ? 'warn' : 'bad'}`} style={{ width: `${healthData?.disk?.percent ?? 0}%` }}></div></div>
         </div>
       </div>
 

@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from datetime import datetime
 from typing import Any, Dict, List, Optional
@@ -42,22 +43,37 @@ def _serialize(lead: Lead) -> Dict[str, Any]:
 
 async def _record_mongo_lead(lead: Lead, raw_payload: Optional[dict] = None) -> None:
     """Mirrors the lead into MongoDB per the spec's per-channel + all_leads collections."""
-    doc = {**_serialize(lead), "raw_payload": raw_payload or {}}
-    await mongo_db["all_leads"].update_one({"_id": lead.id}, {"$set": {**doc, "_id": lead.id}}, upsert=True)
-    channel_collection = SOURCE_COLLECTIONS.get(lead.source)
-    if channel_collection:
-        await mongo_db[channel_collection].update_one({"_id": lead.id}, {"$set": {**doc, "_id": lead.id}}, upsert=True)
+    try:
+        doc = {**_serialize(lead), "raw_payload": raw_payload or {}}
+        await asyncio.wait_for(
+            mongo_db["all_leads"].update_one({"_id": lead.id}, {"$set": {**doc, "_id": lead.id}}, upsert=True),
+            timeout=1.5
+        )
+        channel_collection = SOURCE_COLLECTIONS.get(lead.source)
+        if channel_collection:
+            await asyncio.wait_for(
+                mongo_db[channel_collection].update_one({"_id": lead.id}, {"$set": {**doc, "_id": lead.id}}, upsert=True),
+                timeout=1.5
+            )
+    except Exception as e:
+        logger.error(f"MongoDB mirroring skipped (offline/timeout): {e}")
 
 
 async def _record_lead_event(lead_id: str, organization_id: str, event_type: str, note: str, actor_user_id: Optional[str] = None) -> None:
-    await mongo_db["lead_events"].insert_one({
-        "lead_id": lead_id,
-        "organization_id": organization_id,
-        "type": event_type,
-        "note": note,
-        "actor_user_id": actor_user_id,
-        "created_at": datetime.utcnow(),
-    })
+    try:
+        await asyncio.wait_for(
+            mongo_db["lead_events"].insert_one({
+                "lead_id": lead_id,
+                "organization_id": organization_id,
+                "type": event_type,
+                "note": note,
+                "actor_user_id": actor_user_id,
+                "created_at": datetime.utcnow(),
+            }),
+            timeout=1.5
+        )
+    except Exception as e:
+        logger.error(f"MongoDB event logging skipped (offline/timeout): {e}")
 
 
 @router.get("", response_model=Dict[str, Any])
@@ -198,16 +214,20 @@ async def get_lead_events(
     if not lead or lead.organization_id != current_user.organization_id:
         raise HTTPException(status_code=404, detail="Lead not found")
 
-    cursor = mongo_db["lead_events"].find({"lead_id": lead_id}).sort("created_at", -1).limit(200)
     events: List[Dict[str, Any]] = []
-    async for doc in cursor:
-        events.append({
-            "id": str(doc["_id"]),
-            "type": doc.get("type"),
-            "note": doc.get("note"),
-            "actor_user_id": doc.get("actor_user_id"),
-            "created_at": doc["created_at"].isoformat() if doc.get("created_at") else None,
-        })
+    try:
+        cursor = mongo_db["lead_events"].find({"lead_id": lead_id}).sort("created_at", -1).limit(200)
+        docs = await asyncio.wait_for(cursor.to_list(length=200), timeout=1.5)
+        for doc in docs:
+            events.append({
+                "id": str(doc["_id"]),
+                "type": doc.get("type"),
+                "note": doc.get("note"),
+                "actor_user_id": doc.get("actor_user_id"),
+                "created_at": doc["created_at"].isoformat() if doc.get("created_at") else None,
+            })
+    except Exception as e:
+        logger.error(f"MongoDB lead events query skipped (offline/timeout): {e}")
     return {"events": events}
 
 

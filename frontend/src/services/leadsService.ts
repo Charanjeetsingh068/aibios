@@ -1,4 +1,4 @@
-import { getAccessToken } from './authService';
+import axiosInstance from './axiosInstance';
 
 export interface Lead {
   id: string;
@@ -24,64 +24,38 @@ export interface LeadEvent {
   created_at: string | null;
 }
 
-const API_BASE = '/api/v1/leads';
-
-function authHeaders(): HeadersInit {
-  const token = getAccessToken();
-  return token ? { 'Authorization': `Bearer ${token}` } : {};
-}
-
 export async function fetchLeads(params?: { status?: string; source?: string; search?: string }): Promise<{ leads: Lead[]; total: number }> {
-  const qs = new URLSearchParams();
-  if (params?.status) qs.set('status', params.status);
-  if (params?.source) qs.set('source', params.source);
-  if (params?.search) qs.set('search', params.search);
-  const suffix = qs.toString() ? `?${qs.toString()}` : '';
-  const res = await fetch(`${API_BASE}${suffix}`, { headers: authHeaders() });
-  if (!res.ok) throw new Error('Failed to fetch leads');
-  return res.json();
+  const response = await axiosInstance.get('/leads', { params });
+  return response.data;
 }
 
 export async function createLead(data: {
   name: string; company?: string; phone?: string; email?: string; source: string; value?: number; campaign_id?: string;
 }): Promise<Lead> {
-  const res = await fetch(API_BASE, {
-    method: 'POST',
-    headers: { ...authHeaders(), 'Content-Type': 'application/json' },
-    body: JSON.stringify(data),
-  });
-  if (!res.ok) throw new Error((await res.json().catch(() => null))?.detail || 'Failed to create lead');
-  return res.json();
+  try {
+    const response = await axiosInstance.post('/leads', data);
+    return response.data;
+  } catch (error: any) {
+    throw new Error(error.response?.data?.detail || 'Failed to create lead');
+  }
 }
 
 export async function updateLead(id: string, data: Partial<Pick<Lead, 'name' | 'company' | 'phone' | 'email' | 'status' | 'value' | 'campaign_id' | 'assigned_to'>>): Promise<Lead> {
-  const res = await fetch(`${API_BASE}/${id}`, {
-    method: 'PATCH',
-    headers: { ...authHeaders(), 'Content-Type': 'application/json' },
-    body: JSON.stringify(data),
-  });
-  if (!res.ok) throw new Error('Failed to update lead');
-  return res.json();
+  const response = await axiosInstance.patch(`/leads/${id}`, data);
+  return response.data;
 }
 
 export async function deleteLead(id: string): Promise<{ success: boolean }> {
-  const res = await fetch(`${API_BASE}/${id}`, { method: 'DELETE', headers: authHeaders() });
-  if (!res.ok) throw new Error('Failed to delete lead');
-  return res.json();
+  const response = await axiosInstance.delete(`/leads/${id}`);
+  return response.data;
 }
 
 export async function fetchLeadEvents(id: string): Promise<{ events: LeadEvent[] }> {
-  const res = await fetch(`${API_BASE}/${id}/events`, { headers: authHeaders() });
-  if (!res.ok) throw new Error('Failed to fetch lead events');
-  return res.json();
+  const response = await axiosInstance.get(`/leads/${id}/events`);
+  return response.data;
 }
 
 export async function addLeadEvent(id: string, type: string, note: string): Promise<{ success: boolean }> {
-  const res = await fetch(`${API_BASE}/${id}/events`, {
-    method: 'POST',
-    headers: { ...authHeaders(), 'Content-Type': 'application/json' },
-    body: JSON.stringify({ type, note }),
-  });
-  if (!res.ok) throw new Error('Failed to add lead event');
-  return res.json();
+  const response = await axiosInstance.post(`/leads/${id}/events`, { type, note });
+  return response.data;
 }

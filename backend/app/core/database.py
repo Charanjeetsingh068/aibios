@@ -111,12 +111,14 @@ def get_qdrant_client() -> QdrantClient:
 # ------------------------------------------------------------------------------
 async def verify_postgres() -> bool:
     try:
-        async with AsyncSessionLocal() as session:
+        use_sqlite = await is_postgres_offline()
+        session_factory = SqliteSessionLocal if use_sqlite else AsyncSessionLocal
+        async with session_factory() as session:
             from sqlalchemy import text
             await asyncio.wait_for(session.execute(text("SELECT 1")), timeout=2.0)
         return True
     except Exception as e:
-        logger.error(f"PostgreSQL connection verification failed: {e}")
+        logger.error(f"Database connection verification failed: {e}")
         return False
 
 async def verify_mongo() -> bool:

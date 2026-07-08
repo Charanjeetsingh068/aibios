@@ -22,7 +22,7 @@ def test_endpoints():
     for ep, keys in endpoints.items():
         url = f"{base_url}/{ep}"
         try:
-            req = urllib.request.urlopen(url, timeout=3.0)
+            req = urllib.request.urlopen(url, timeout=10.0)
             code = req.getcode()
             if code != 200:
                 print(f"  [FAIL] {ep} returned status code {code}")

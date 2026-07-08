@@ -1,4 +1,4 @@
-import { getAccessToken } from './authService';
+import axiosInstance from './axiosInstance';
 
 export interface IntegrationStatus {
   id: string;
@@ -10,29 +10,22 @@ export interface IntegrationStatus {
   connected_at: string | null;
 }
 
-const API_BASE = '/api/v1/integrations';
-
-function authHeaders(): HeadersInit {
-  const token = getAccessToken();
-  return token ? { 'Authorization': `Bearer ${token}` } : {};
-}
-
 export async function fetchIntegrations(): Promise<{ integrations: IntegrationStatus[] }> {
-  const res = await fetch(API_BASE, { headers: authHeaders() });
-  if (!res.ok) throw new Error('Failed to fetch integrations');
-  return res.json();
+  const response = await axiosInstance.get('/integrations');
+  return response.data;
 }
 
 /** Always hits the real backend. Throws with the server's actual reason when a channel isn't configured. */
 export async function connectIntegration(channel: string): Promise<IntegrationStatus> {
-  const res = await fetch(`${API_BASE}/${channel}/connect`, { method: 'POST', headers: authHeaders() });
-  const body = await res.json().catch(() => null);
-  if (!res.ok) throw new Error(body?.detail || 'Failed to connect integration');
-  return body;
+  try {
+    const response = await axiosInstance.post(`/integrations/${channel}/connect`);
+    return response.data;
+  } catch (error: any) {
+    throw new Error(error.response?.data?.detail || 'Failed to connect integration');
+  }
 }
 
 export async function disconnectIntegration(channel: string): Promise<IntegrationStatus> {
-  const res = await fetch(`${API_BASE}/${channel}/disconnect`, { method: 'POST', headers: authHeaders() });
-  if (!res.ok) throw new Error('Failed to disconnect integration');
-  return res.json();
+  const response = await axiosInstance.post(`/integrations/${channel}/disconnect`);
+  return response.data;
 }
