@@ -1,3 +1,4 @@
+import hashlib
 import logging
 from qdrant_client.http.models import Distance, VectorParams
 from app.core.database import get_qdrant_client, verify_qdrant
@@ -30,8 +31,12 @@ async def get_embedding(text: str) -> list[float]:
                     return res.json()["data"][0]["embedding"]
         except Exception as e:
             logger.error(f"OpenAI embeddings call failed: {e}")
-            
-    h = hash(text)
+
+    # Deterministic fallback vector so repeated runs of the same text (including across
+    # process restarts) produce the same result — Python's builtin hash() is salted per
+    # process by default and would silently change on every restart.
+    digest = hashlib.sha256(text.encode("utf-8")).digest()
+    h = int.from_bytes(digest[:8], "big", signed=False)
     return [((h + idx) % 1000) / 1000.0 for idx in range(VECTOR_DIMENSION)]
 
 
@@ -64,7 +69,7 @@ async def upsert_kb_article_vector(article_id: str, title: str, category: str):
         try:
             point_id = int(uuid.UUID(article_id).int & 0xffffffffffffffff)
         except Exception:
-            point_id = abs(hash(article_id)) % (10 ** 10)
+            point_id = int(hashlib.sha256(article_id.encode("utf-8")).hexdigest(), 16) % (10 ** 10)
             
         client.upsert(
             collection_name=COLLECTION_NAME,

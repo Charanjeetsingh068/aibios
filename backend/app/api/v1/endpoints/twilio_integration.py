@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.database import get_db
+from app.core.security import verify_twilio_signature
 from app.api.v1.endpoints.auth import get_current_user
 from app.models.auth import User
 from app.models.business import CallLog
@@ -21,13 +22,27 @@ class SendSMSBody(BaseModel):
     message: str
 
 
+async def _require_valid_twilio_signature(request: Request) -> Dict[str, Any]:
+    """Shared guard for all Twilio webhook endpoints. Fails closed if TWILIO_AUTH_TOKEN
+    isn't configured, since there is then no way to verify the request actually came from
+    Twilio. Returns the parsed form data on success."""
+    form_data = await request.form()
+    signature = request.headers.get("x-twilio-signature")
+    if not verify_twilio_signature(settings.TWILIO_AUTH_TOKEN, str(request.url), dict(form_data), signature):
+        logger.warning("Rejected Twilio webhook request: missing/invalid X-Twilio-Signature.")
+        raise HTTPException(status_code=401, detail="Invalid Twilio request signature")
+    return form_data
+
+
 @router.post("/voice")
-async def twilio_voice_callback():
+async def twilio_voice_callback(request: Request):
     """TwiML callback for handling incoming voice calls, greeting user and transferring to supervisor agent."""
-    xml_content = """<?xml version="1.0" encoding="UTF-8"?>
+    await _require_valid_twilio_signature(request)
+    gather_action = f"{settings.API_V1_STR}/twilio/voice/gather"
+    xml_content = f"""<?xml version="1.0" encoding="UTF-8"?>
 <Response>
     <Say voice="Polly.Joey">Welcome to the AI-BOS Smart Agent Telephony. Please hold while we connect you to our AI supervisor node.</Say>
-    <Gather numDigits="1" action="/api/v1/twilio/voice/gather" method="POST" timeout="10">
+    <Gather numDigits="1" action="{gather_action}" method="POST" timeout="10">
         <Say voice="Polly.Joey">Press 1 to speak with sales. Press 2 to talk to support. Press any other key to wait.</Say>
     </Gather>
     <Say voice="Polly.Joey">We did not receive any input. Goodbye.</Say>
@@ -38,21 +53,28 @@ async def twilio_voice_callback():
 @router.post("/voice/gather")
 async def twilio_voice_gather(request: Request):
     """Handles user keypress options."""
-    form_data = await request.form()
+    form_data = await _require_valid_twilio_signature(request)
     digits = form_data.get("Digits", "")
     logger.info(f"Twilio gather received digits: {digits}")
-    
+
+    record_action = f"{settings.API_V1_STR}/twilio/voice/record"
     if digits == "1":
-        xml = """<?xml version="1.0" encoding="UTF-8"?>
+        xml = f"""<?xml version="1.0" encoding="UTF-8"?>
 <Response>
     <Say voice="Polly.Joey">Connecting you to the automated Sales AI. Please state your query after the tone.</Say>
-    <Record maxLength="30" playBeep="true" action="/api/v1/twilio/voice/record" method="POST"/>
+    <Record maxLength="30" playBeep="true" action="{record_action}" method="POST"/>
 </Response>"""
     elif digits == "2":
-        xml = """<?xml version="1.0" encoding="UTF-8"?>
+        if not settings.TWILIO_SUPPORT_NUMBER:
+            xml = """<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+    <Say voice="Polly.Joey">Support routing is not configured yet. Please try again later. Goodbye.</Say>
+</Response>"""
+        else:
+            xml = f"""<?xml version="1.0" encoding="UTF-8"?>
 <Response>
     <Say voice="Polly.Joey">Connecting to the Support knowledge router. Welcome.</Say>
-    <Dial>+15550199000</Dial>
+    <Dial>{settings.TWILIO_SUPPORT_NUMBER}</Dial>
 </Response>"""
     else:
         xml = """<?xml version="1.0" encoding="UTF-8"?>
@@ -66,7 +88,7 @@ async def twilio_voice_gather(request: Request):
 async def twilio_voice_events(request: Request, db: AsyncSession = Depends(get_db)):
     """Receives and logs calls state updates from Twilio (ringing, answered, duration, cost)."""
     try:
-        form_data = await request.form()
+        form_data = await _require_valid_twilio_signature(request)
         call_sid = form_data.get("CallSid")
         call_status = form_data.get("CallStatus")
         duration = form_data.get("CallDuration")
@@ -88,9 +110,11 @@ async def twilio_voice_events(request: Request, db: AsyncSession = Depends(get_d
                 )
                 db.add(call)
                 await db.commit()
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error logging Twilio voice call event: {e}")
-        
+
     return {"status": "event_logged"}
 
 
@@ -105,13 +129,11 @@ async def send_sms_message(
     from_num = settings.TWILIO_PHONE_NUMBER
     
     if not sid or not token or not from_num:
-        logger.warning("Twilio parameters missing. Simulating successful SMS dispatch.")
-        return {
-            "success": True,
-            "detail": "Twilio not configured. SMS simulated successfully.",
-            "to": body.to_number
-        }
-        
+        raise HTTPException(
+            status_code=503,
+            detail="Twilio is not configured (missing TWILIO_ACCOUNT_SID/TWILIO_AUTH_TOKEN/TWILIO_PHONE_NUMBER).",
+        )
+
     url = f"https://api.twilio.com/2010-04-01/Accounts/{sid}/Messages.json"
     auth = (sid, token)
     try:
@@ -130,6 +152,8 @@ async def send_sms_message(
                 return {"success": True, "data": res.json()}
             else:
                 raise HTTPException(status_code=res.status_code, detail=res.text)
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Failed to send Twilio SMS: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=502, detail=str(e))

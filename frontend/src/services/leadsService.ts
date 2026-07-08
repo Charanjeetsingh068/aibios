@@ -24,7 +24,7 @@ export interface LeadEvent {
   created_at: string | null;
 }
 
-export async function fetchLeads(params?: { status?: string; source?: string; search?: string }): Promise<{ leads: Lead[]; total: number }> {
+export async function fetchLeads(params?: { status?: string; source?: string; search?: string; limit?: number; offset?: number }): Promise<{ leads: Lead[]; total: number }> {
   const response = await axiosInstance.get('/leads', { params });
   return response.data;
 }

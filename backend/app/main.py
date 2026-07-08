@@ -80,8 +80,13 @@ if settings.ENVIRONMENT == "production":
 
 # Apply Trusted Hosts Middleware
 if settings.ENVIRONMENT == "production":
-    # Strict list of allowed hosts in production
-    fastapi_app.add_middleware(TrustedHostMiddleware, allowed_hosts=["example.com", "*.example.com"])
+    # Strict list of allowed hosts in production, driven by ALLOWED_HOSTS env var
+    if not settings.ALLOWED_HOSTS:
+        logger.warning(
+            "ENVIRONMENT=production but ALLOWED_HOSTS is not set — all Host headers will be "
+            "rejected by TrustedHostMiddleware. Set ALLOWED_HOSTS to your real domain(s)."
+        )
+    fastapi_app.add_middleware(TrustedHostMiddleware, allowed_hosts=settings.ALLOWED_HOSTS or [])
 else:
     # Allow localhost, 127.0.0.1, and subdomains in development
     fastapi_app.add_middleware(TrustedHostMiddleware, allowed_hosts=["localhost", "127.0.0.1", "*.localhost"])

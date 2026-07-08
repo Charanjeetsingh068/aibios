@@ -395,7 +395,7 @@ async def forgot_password(
     await db.commit()
 
     # Note: In production we dispatch via SMTP; for local E2E verification we log it to standard stdout.
-    logger.info(f"== LOCAL RESET PASSWORD URL (DEVELOPMENT ONLY): http://localhost:3000/auth/reset-password?token={raw_token} ==")
+    logger.info(f"== LOCAL RESET PASSWORD URL (DEVELOPMENT ONLY): {settings.FRONTEND_URL}/auth/reset-password?token={raw_token} ==")
 
     return {"message": "If the email is registered, a password reset link has been dispatched", "token_dev_only": raw_token}
 
@@ -429,12 +429,16 @@ async def reset_password(
     user.password_hash = get_password_hash(reset_data.new_password)
     target_token.is_used = True
 
+    was_invited = user.status == "invited"
+    if was_invited:
+        user.status = "active"
+
     # Audit logging
     audit = AuditLog(
         user_id=user.id,
         organization_id=user.organization_id,
-        action="password_reset_success",
-        description="Password reset successfully completed using token recovery",
+        action="invite_accepted" if was_invited else "password_reset_success",
+        description="Invite accepted and password set" if was_invited else "Password reset successfully completed using token recovery",
         resource="users",
         resource_id=user.id
     )

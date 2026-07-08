@@ -3,7 +3,7 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel
-from sqlalchemy import select, func
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db, verify_qdrant, get_qdrant_client
@@ -26,28 +26,11 @@ def _serialize(art: KbArticle) -> Dict[str, Any]:
     }
 
 
-async def _seed_kb_if_empty(db: AsyncSession, org_id: str):
-    count_stmt = select(func.count(KbArticle.id)).where(KbArticle.organization_id == org_id)
-    count_res = await db.execute(count_stmt)
-    if (count_res.scalar() or 0) == 0:
-        defaults = [
-            {"title": "Getting Started with AI-BOS", "category": "Onboarding", "views": 1420},
-            {"title": "Configuring Lead Capture Webhooks", "category": "Integrations", "views": 892},
-            {"title": "RBAC Roles & Permission Guide", "category": "Security", "views": 764},
-            {"title": "AI Voice Agent Setup", "category": "AI Platform", "views": 1103},
-            {"title": "WhatsApp Integration Manual", "category": "Channels", "views": 678},
-        ]
-        for item in defaults:
-            db.add(KbArticle(organization_id=org_id, **item))
-        await db.commit()
-
-
 @router.get("", response_model=Dict[str, Any])
 async def list_articles(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    await _seed_kb_if_empty(db, current_user.organization_id)
     query = (
         select(KbArticle)
         .where(KbArticle.organization_id == current_user.organization_id)
@@ -111,7 +94,6 @@ async def search_articles(
     db: AsyncSession = Depends(get_db),
 ):
     """Executes keyword-based search on the database or fallback semantic search."""
-    await _seed_kb_if_empty(db, current_user.organization_id)
     # Database pattern matching
     like_query = f"%{q}%"
     stmt = (

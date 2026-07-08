@@ -1,3 +1,4 @@
+import json
 import logging
 from typing import Any, Dict
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
@@ -8,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.database import get_db
+from app.core.security import verify_meta_signature
 from app.api.v1.endpoints.auth import get_current_user
 from app.models.auth import User
 from app.models.business import Lead
@@ -34,8 +36,8 @@ async def verify_whatsapp_webhook(
     hub_verify_token: str = Query(None, alias="hub.verify_token")
 ):
     """Meta webhook verification endpoint."""
-    expected_token = settings.WHATSAPP_WEBHOOK_VERIFY_TOKEN or "whatsapp_verify_token_default_2026"
-    if hub_mode == "subscribe" and hub_verify_token == expected_token:
+    expected_token = settings.WHATSAPP_WEBHOOK_VERIFY_TOKEN
+    if expected_token and hub_mode == "subscribe" and hub_verify_token == expected_token:
         logger.info("WhatsApp webhook verified successfully.")
         return Response(content=hub_challenge, media_type="text/plain")
     else:
@@ -46,8 +48,14 @@ async def verify_whatsapp_webhook(
 @router.post("/webhook")
 async def receive_whatsapp_webhook(request: Request, db: AsyncSession = Depends(get_db)):
     """Receives and parses incoming messages webhook events from Meta WhatsApp Cloud API."""
+    raw_body = await request.body()
+    signature = request.headers.get("x-hub-signature-256")
+    if not verify_meta_signature(settings.WHATSAPP_APP_SECRET, raw_body, signature):
+        logger.warning("Rejected WhatsApp webhook: missing/invalid X-Hub-Signature-256.")
+        raise HTTPException(status_code=401, detail="Invalid webhook signature")
+
     try:
-        body = await request.json()
+        body = json.loads(raw_body)
         logger.info(f"Received WhatsApp webhook body: {body}")
         
         entries = body.get("entry", [])
@@ -97,13 +105,11 @@ async def send_whatsapp_message(
     phone_id = settings.WHATSAPP_PHONE_NUMBER_ID
     
     if not token or not phone_id:
-        logger.warning("WhatsApp config missing. Simulating successful message dispatch.")
-        return {
-            "success": True,
-            "detail": "WhatsApp not fully configured. Message simulated successfully.",
-            "to": body.to_number
-        }
-        
+        raise HTTPException(
+            status_code=503,
+            detail="WhatsApp is not configured (missing WHATSAPP_ACCESS_TOKEN/WHATSAPP_PHONE_NUMBER_ID).",
+        )
+
     url = f"https://graph.facebook.com/v18.0/{phone_id}/messages"
     try:
         async with httpx.AsyncClient() as client:
@@ -122,9 +128,11 @@ async def send_whatsapp_message(
                 return {"success": True, "data": res.json()}
             else:
                 raise HTTPException(status_code=res.status_code, detail=res.text)
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Failed to send WhatsApp message: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=502, detail=str(e))
 
 
 @router.post("/send-template", response_model=Dict[str, Any])
@@ -137,14 +145,11 @@ async def send_whatsapp_template(
     phone_id = settings.WHATSAPP_PHONE_NUMBER_ID
     
     if not token or not phone_id:
-        logger.warning("WhatsApp config missing. Simulating template dispatch.")
-        return {
-            "success": True,
-            "detail": "WhatsApp credentials not set. Template simulated.",
-            "to": body.to_number,
-            "template": body.template_name
-        }
-        
+        raise HTTPException(
+            status_code=503,
+            detail="WhatsApp is not configured (missing WHATSAPP_ACCESS_TOKEN/WHATSAPP_PHONE_NUMBER_ID).",
+        )
+
     url = f"https://graph.facebook.com/v18.0/{phone_id}/messages"
     try:
         async with httpx.AsyncClient() as client:
@@ -166,6 +171,8 @@ async def send_whatsapp_template(
                 return {"success": True, "data": res.json()}
             else:
                 raise HTTPException(status_code=res.status_code, detail=res.text)
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Failed to send WhatsApp template: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=502, detail=str(e))

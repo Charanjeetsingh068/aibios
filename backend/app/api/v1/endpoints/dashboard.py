@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import secrets
 import time
 import platform
 import os
@@ -11,17 +12,26 @@ from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.core.config import settings
 from app.core.database import get_db, verify_postgres, verify_mongo, verify_redis, verify_qdrant
 from app.core import telemetry
-from app.api.v1.endpoints.auth import get_current_user
+from app.core.security import get_password_hash
+from app.api.v1.endpoints.auth import get_current_user, RoleChecker
 from app.api.v1.endpoints.system import get_uptime
-from app.models.auth import User, Organization, Role, Permission
+from app.models.auth import User, Organization, Role, Permission, PasswordResetToken
 from app.models.business import (
     Lead, Deal, Campaign, CallLog, Meeting, TaskItem, EmailQueueItem, TokenUsageEvent,
 )
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+# Org/user/role administration is restricted to admin roles. Role.permissions are shared
+# globally across all tenants (Role has no organization_id), so mutating a role's permission
+# set is intentionally locked to super_admin only, not org_admin, to prevent a tenant admin
+# from altering permissions for every other organization's users of the same role.
+require_org_admin = RoleChecker(["super_admin", "org_admin"])
+require_super_admin = RoleChecker(["super_admin"])
 
 
 @router.get("/metrics", response_model=Dict[str, Any])
@@ -436,15 +446,12 @@ class UserInviteBody(BaseModel):
     permissions: List[str] = []
 
 
-@router.post("/users/invite", response_model=Dict[str, Any])
+@router.post("/users/invite", response_model=Dict[str, Any], dependencies=[Depends(require_org_admin)])
 async def invite_user(
     body: UserInviteBody,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
-    from app.core.security import get_password_hash
-    import secrets
-
     name_parts = body.name.strip().split(" ", 1)
     first_name = name_parts[0]
     last_name = name_parts[1] if len(name_parts) > 1 else ""
@@ -454,22 +461,35 @@ async def invite_user(
     if existing.scalar_one_or_none():
         raise HTTPException(status_code=400, detail="User with this email already exists")
 
-    # Add user
+    role = await db.get(Role, body.role)
+    if not role:
+        raise HTTPException(status_code=400, detail=f"Unknown role: {body.role}")
+
+    # Invited users get no usable password at creation time — the only way into the
+    # account is redeeming the invite token below via the existing reset-password flow.
     new_u = User(
         organization_id=current_user.organization_id,
         first_name=first_name,
         last_name=last_name,
         email=body.email.strip(),
-        password_hash=get_password_hash("123456"),
+        password_hash=get_password_hash(secrets.token_urlsafe(32)),
         status="invited",
         role_id=body.role
     )
     db.add(new_u)
+    await db.flush()  # populate new_u.id
+
+    raw_invite_token = secrets.token_urlsafe(32)
+    invite_token_row = PasswordResetToken(
+        user_id=new_u.id,
+        token_hash=get_password_hash(raw_invite_token),
+        expires_at=datetime.utcnow() + timedelta(days=7),
+    )
+    db.add(invite_token_row)
     await db.commit()
     await db.refresh(new_u)
 
-    invite_token = secrets.token_urlsafe(16)
-    invite_link = f"http://localhost:3000/auth/login?invite={invite_token}"
+    invite_link = f"{settings.FRONTEND_URL}/auth/reset-password?token={raw_invite_token}"
 
     return {
         "user": {
@@ -491,7 +511,7 @@ class UserUpdateBody(BaseModel):
     status: Optional[str] = None
 
 
-@router.patch("/users/{user_id}", response_model=Dict[str, Any])
+@router.patch("/users/{user_id}", response_model=Dict[str, Any], dependencies=[Depends(require_org_admin)])
 async def update_user_details(
     user_id: str,
     body: UserUpdateBody,
@@ -509,6 +529,9 @@ async def update_user_details(
     if body.email is not None:
         u.email = body.email.strip()
     if body.role is not None:
+        role = await db.get(Role, body.role)
+        if not role:
+            raise HTTPException(status_code=400, detail=f"Unknown role: {body.role}")
         u.role_id = body.role
     if body.status is not None:
         u.status = body.status
@@ -525,7 +548,7 @@ async def update_user_details(
     }
 
 
-@router.delete("/users/{user_id}", response_model=Dict[str, Any])
+@router.delete("/users/{user_id}", response_model=Dict[str, Any], dependencies=[Depends(require_org_admin)])
 async def delete_user(
     user_id: str,
     current_user: User = Depends(get_current_user),
@@ -541,7 +564,7 @@ async def delete_user(
     return {"success": True}
 
 
-@router.post("/users/{user_id}/reset-password", response_model=Dict[str, Any])
+@router.post("/users/{user_id}/reset-password", response_model=Dict[str, Any], dependencies=[Depends(require_org_admin)])
 async def reset_user_password(
     user_id: str,
     current_user: User = Depends(get_current_user),
@@ -551,9 +574,16 @@ async def reset_user_password(
     if not u or u.organization_id != current_user.organization_id:
         raise HTTPException(status_code=404, detail="User not found")
 
-    import secrets
-    token = secrets.token_urlsafe(16)
-    reset_link = f"http://localhost:3000/auth/reset-password?token={token}"
+    raw_token = secrets.token_urlsafe(32)
+    reset_token = PasswordResetToken(
+        user_id=u.id,
+        token_hash=get_password_hash(raw_token),
+        expires_at=datetime.utcnow() + timedelta(hours=24),
+    )
+    db.add(reset_token)
+    await db.commit()
+
+    reset_link = f"{settings.FRONTEND_URL}/auth/reset-password?token={raw_token}"
     return {"reset_link": reset_link}
 
 
@@ -561,7 +591,7 @@ class RoleUpdateBody(BaseModel):
     permissions: List[str]
 
 
-@router.patch("/roles/{role_id}", response_model=Dict[str, Any])
+@router.patch("/roles/{role_id}", response_model=Dict[str, Any], dependencies=[Depends(require_super_admin)])
 async def update_role_permissions(
     role_id: str,
     body: RoleUpdateBody,
@@ -648,7 +678,7 @@ async def get_organization_details(
         "smtp_host": org.smtp_host,
         "smtp_port": org.smtp_port,
         "smtp_user": org.smtp_user,
-        "smtp_pass": org.smtp_pass,
+        "smtp_configured": bool(org.smtp_pass),
         "user_count": user_count,
         "created_at": org.created_at.isoformat() if org.created_at else None,
     }
@@ -669,7 +699,7 @@ class OrganizationUpdateBody(BaseModel):
     smtp_pass: Optional[str] = None
 
 
-@router.patch("/organization", response_model=Dict[str, Any])
+@router.patch("/organization", response_model=Dict[str, Any], dependencies=[Depends(require_org_admin)])
 async def update_organization_details(
     body: OrganizationUpdateBody,
     current_user: User = Depends(get_current_user),
@@ -711,7 +741,7 @@ async def update_organization_details(
         "smtp_host": org.smtp_host,
         "smtp_port": org.smtp_port,
         "smtp_user": org.smtp_user,
-        "smtp_pass": org.smtp_pass,
+        "smtp_configured": bool(org.smtp_pass),
         "user_count": user_count,
         "created_at": org.created_at.isoformat() if org.created_at else None,
     }

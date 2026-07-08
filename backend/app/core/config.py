@@ -24,13 +24,26 @@ class Settings(BaseSettings):
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 8  # 8 days
     ENVIRONMENT: str = "development"
 
+    # Public base URL of the frontend app, used to build links sent to users
+    # (password reset, invite acceptance). Must be overridden in production.
+    FRONTEND_URL: str = "http://localhost:3000"
+
     # CORS Configuration
     BACKEND_CORS_ORIGINS: Annotated[
         Union[List[str], str], BeforeValidator(check_cors_origins)
     ] = []
 
+    # Trusted host allowlist for production (comma-separated, e.g. "app.example.com,*.example.com")
+    ALLOWED_HOSTS: Annotated[
+        Union[List[str], str], BeforeValidator(check_cors_origins)
+    ] = []
+
     # Security & RBAC Configuration
     DEFAULT_ROLES: str = "administrator,manager,agent,auditor,developer"
+
+    # Production admin bootstrap (used only when ENVIRONMENT != development; see seed_database)
+    ADMIN_EMAIL: Optional[str] = None
+    ADMIN_PASSWORD: Optional[str] = None
 
     @property
     def roles_list(self) -> List[str]:
@@ -85,10 +98,17 @@ class Settings(BaseSettings):
     GOOGLE_SERVICE_ACCOUNT_JSON: Optional[str] = None
     GOOGLE_SHEETS_SPREADSHEET_ID: Optional[str] = None
 
+    # OAuth Login Providers
+    GOOGLE_CLIENT_ID: Optional[str] = None
+    GOOGLE_CLIENT_SECRET: Optional[str] = None
+    MICROSOFT_CLIENT_ID: Optional[str] = None
+    MICROSOFT_CLIENT_SECRET: Optional[str] = None
+
     # AI Voice Providers
     TWILIO_ACCOUNT_SID: Optional[str] = None
     TWILIO_AUTH_TOKEN: Optional[str] = None
     TWILIO_PHONE_NUMBER: Optional[str] = None
+    TWILIO_SUPPORT_NUMBER: Optional[str] = None
     ELEVENLABS_API_KEY: Optional[str] = None
 
     # S3 Object Storage Configuration

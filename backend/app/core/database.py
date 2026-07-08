@@ -1,5 +1,7 @@
 import logging
 import asyncio
+import time
+import uuid
 from typing import AsyncGenerator, Optional, List, Dict, Any
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -109,6 +111,8 @@ class SafeRedisPipeline:
         for cmd in self.commands:
             if cmd[0] == "set":
                 await self.safe_client.set(cmd[1], cmd[2])
+            elif cmd[0] == "expire":
+                await self.safe_client.expire(cmd[1], cmd[2])
         return []
 
     async def __aenter__(self):
@@ -118,20 +122,37 @@ class SafeRedisPipeline:
         pass
 
 class SafeRedisClient:
+    # How often to retry a real connection after Redis was last seen offline. Without this,
+    # a transient outage would be cached as "offline" forever until the process restarts.
+    RECHECK_INTERVAL_SECONDS = 30
+
     def __init__(self, real_client):
         self.real_client = real_client
         self._local_storage = {}
+        self._local_expiry: Dict[str, float] = {}
         self._is_online = None
+        self._last_checked_at = 0.0
+
+    def _purge_if_expired(self, key: str) -> None:
+        expires_at = self._local_expiry.get(key)
+        if expires_at is not None and time.monotonic() >= expires_at:
+            self._local_storage.pop(key, None)
+            self._local_expiry.pop(key, None)
 
     async def _test_connection(self) -> bool:
-        if self._is_online is not None:
+        now = time.monotonic()
+        if self._is_online is not None and (now - self._last_checked_at) < self.RECHECK_INTERVAL_SECONDS:
             return self._is_online
         try:
             await asyncio.wait_for(self.real_client.ping(), timeout=1.0)
+            if not self._is_online:
+                logger.info("Redis connection restored.")
             self._is_online = True
         except Exception:
-            logger.warning("Redis is offline. Falling back to local mock storage.")
+            if self._is_online is not False:
+                logger.warning("Redis is offline. Falling back to local mock storage.")
             self._is_online = False
+        self._last_checked_at = now
         return self._is_online
 
     async def ping(self) -> bool:
@@ -148,6 +169,7 @@ class SafeRedisClient:
                 return await self.real_client.get(key)
             except Exception:
                 self._is_online = False
+        self._purge_if_expired(key)
         return self._local_storage.get(key)
 
     async def set(self, key: str, value: Any, ex: Optional[int] = None) -> bool:
@@ -157,6 +179,20 @@ class SafeRedisClient:
             except Exception:
                 self._is_online = False
         self._local_storage[key] = str(value)
+        if ex is not None:
+            self._local_expiry[key] = time.monotonic() + ex
+        else:
+            self._local_expiry.pop(key, None)
+        return True
+
+    async def expire(self, key: str, seconds: int) -> bool:
+        if await self._test_connection():
+            try:
+                return await self.real_client.expire(key, seconds)
+            except Exception:
+                self._is_online = False
+        if key in self._local_storage:
+            self._local_expiry[key] = time.monotonic() + seconds
         return True
 
     async def incr(self, key: str) -> int:
@@ -165,6 +201,7 @@ class SafeRedisClient:
                 return await self.real_client.incr(key)
             except Exception:
                 self._is_online = False
+        self._purge_if_expired(key)
         current = int(self._local_storage.get(key, 0)) + 1
         self._local_storage[key] = str(current)
         return current
@@ -176,6 +213,8 @@ class SafeRedisClient:
             except Exception:
                 self._is_online = False
         import fnmatch
+        for k in list(self._local_storage.keys()):
+            self._purge_if_expired(k)
         return [k for k in self._local_storage.keys() if fnmatch.fnmatch(k, pattern)]
 
     async def delete(self, *keys) -> int:
@@ -327,23 +366,52 @@ async def seed_database(session):
         await session.commit()
         
     # 4. Seed Super Admin User
-    admin_email = "charanjeet.s7730@gmail.com"
-    q_user = await session.execute(select(User).where(User.email == admin_email))
-    admin_user = q_user.scalar_one_or_none()
-    
-    if not admin_user:
-        admin_user = User(
-            id="superadmin-uuid-placeholder-123456",
-            organization_id=demo_org.id,
-            first_name="Charanjeet",
-            last_name="Singh",
-            email=admin_email,
-            password_hash=get_password_hash("123456"),
-            role_id="super_admin",
-            status="active"
+    # Local-dev convenience account: only ever created when running in development,
+    # never with a hardcoded password in a production database.
+    if settings.ENVIRONMENT not in ("production", "prod"):
+        admin_email = "charanjeet.s7730@gmail.com"
+        q_user = await session.execute(select(User).where(User.email == admin_email))
+        admin_user = q_user.scalar_one_or_none()
+
+        if not admin_user:
+            admin_user = User(
+                id="superadmin-uuid-placeholder-123456",
+                organization_id=demo_org.id,
+                first_name="Charanjeet",
+                last_name="Singh",
+                email=admin_email,
+                password_hash=get_password_hash("123456"),
+                role_id="super_admin",
+                status="active"
+            )
+            session.add(admin_user)
+            await session.commit()
+    elif settings.ADMIN_EMAIL and settings.ADMIN_PASSWORD:
+        # Production bootstrap: first admin is created from operator-supplied env vars,
+        # once, and never re-seeded with a fixed password on subsequent restarts.
+        q_user = await session.execute(select(User).where(User.email == settings.ADMIN_EMAIL))
+        admin_user = q_user.scalar_one_or_none()
+
+        if not admin_user:
+            admin_user = User(
+                id=str(uuid.uuid4()),
+                organization_id=demo_org.id,
+                first_name="Admin",
+                last_name="User",
+                email=settings.ADMIN_EMAIL,
+                password_hash=get_password_hash(settings.ADMIN_PASSWORD),
+                role_id="super_admin",
+                status="active"
+            )
+            session.add(admin_user)
+            await session.commit()
+            logger.info(f"Production admin account bootstrapped for {settings.ADMIN_EMAIL}.")
+    else:
+        logger.warning(
+            "Running in production with no existing admin and no ADMIN_EMAIL/ADMIN_PASSWORD "
+            "set — skipping admin account seeding. Set both env vars to bootstrap the first "
+            "administrator, or create one manually."
         )
-        session.add(admin_user)
-        await session.commit()
 
 
 from contextlib import asynccontextmanager

@@ -25,26 +25,30 @@ async def get_oauth_url(provider: str):
     """Returns the authorization redirect URI for the specified OAuth provider."""
     provider = provider.lower()
     if provider == "google":
-        client_id = "google-client-id-placeholder"
-        redirect_uri = "http://localhost:3000/auth/callback/google"
+        if not settings.GOOGLE_CLIENT_ID:
+            raise HTTPException(status_code=501, detail="Google OAuth is not configured (missing GOOGLE_CLIENT_ID).")
+        redirect_uri = f"{settings.FRONTEND_URL}/auth/callback/google"
         scope = "https://www.googleapis.com/auth/userinfo.profile https://www.googleapis.com/auth/userinfo.email"
-        url = f"https://accounts.google.com/o/oauth2/v2/auth?response_type=code&client_id={client_id}&redirect_uri={redirect_uri}&scope={scope}&state=state_google"
+        url = f"https://accounts.google.com/o/oauth2/v2/auth?response_type=code&client_id={settings.GOOGLE_CLIENT_ID}&redirect_uri={redirect_uri}&scope={scope}&state=state_google"
         return {"url": url}
     elif provider == "facebook":
-        app_id = settings.FACEBOOK_APP_ID or "fb-app-id-placeholder"
-        redirect_uri = settings.FACEBOOK_REDIRECT_URI or "http://localhost:3000/auth/callback/facebook"
-        url = f"https://www.facebook.com/v18.0/dialog/oauth?client_id={app_id}&redirect_uri={redirect_uri}&state=state_facebook&scope=email,public_profile"
+        if not settings.FACEBOOK_APP_ID:
+            raise HTTPException(status_code=501, detail="Facebook OAuth is not configured (missing FACEBOOK_APP_ID).")
+        redirect_uri = settings.FACEBOOK_REDIRECT_URI or f"{settings.FRONTEND_URL}/auth/callback/facebook"
+        url = f"https://www.facebook.com/v18.0/dialog/oauth?client_id={settings.FACEBOOK_APP_ID}&redirect_uri={redirect_uri}&state=state_facebook&scope=email,public_profile"
         return {"url": url}
     elif provider == "instagram":
-        app_id = settings.FACEBOOK_APP_ID or "fb-app-id-placeholder"
-        redirect_uri = settings.FACEBOOK_REDIRECT_URI or "http://localhost:3000/auth/callback/instagram"
-        url = f"https://api.instagram.com/oauth/authorize?client_id={app_id}&redirect_uri={redirect_uri}&scope=user_profile,user_media&response_type=code&state=state_instagram"
+        if not settings.FACEBOOK_APP_ID:
+            raise HTTPException(status_code=501, detail="Instagram OAuth is not configured (missing FACEBOOK_APP_ID).")
+        redirect_uri = settings.FACEBOOK_REDIRECT_URI or f"{settings.FRONTEND_URL}/auth/callback/instagram"
+        url = f"https://api.instagram.com/oauth/authorize?client_id={settings.FACEBOOK_APP_ID}&redirect_uri={redirect_uri}&scope=user_profile,user_media&response_type=code&state=state_instagram"
         return {"url": url}
     elif provider == "microsoft":
-        client_id = "ms-client-id-placeholder"
-        redirect_uri = "http://localhost:3000/auth/callback/microsoft"
+        if not settings.MICROSOFT_CLIENT_ID:
+            raise HTTPException(status_code=501, detail="Microsoft OAuth is not configured (missing MICROSOFT_CLIENT_ID).")
+        redirect_uri = f"{settings.FRONTEND_URL}/auth/callback/microsoft"
         scope = "openid profile email User.Read"
-        url = f"https://login.microsoftonline.com/common/oauth2/v2.0/authorize?client_id={client_id}&response_type=code&redirect_uri={redirect_uri}&response_mode=query&scope={scope}&state=state_microsoft"
+        url = f"https://login.microsoftonline.com/common/oauth2/v2.0/authorize?client_id={settings.MICROSOFT_CLIENT_ID}&response_type=code&redirect_uri={redirect_uri}&response_mode=query&scope={scope}&state=state_microsoft"
         return {"url": url}
     else:
         raise HTTPException(status_code=400, detail=f"Unsupported OAuth provider: {provider}")
@@ -61,17 +65,19 @@ async def oauth_callback(
     email = ""
     first_name = ""
     last_name = ""
-    
+
     if provider == "google":
+        if not settings.GOOGLE_CLIENT_ID or not settings.GOOGLE_CLIENT_SECRET:
+            raise HTTPException(status_code=501, detail="Google OAuth is not configured on this server.")
         try:
             async with httpx.AsyncClient() as client:
                 token_res = await client.post(
                     "https://oauth2.googleapis.com/token",
                     data={
                         "code": payload.code,
-                        "client_id": "google-client-id-placeholder",
-                        "client_secret": "google-client-secret-placeholder",
-                        "redirect_uri": "http://localhost:3000/auth/callback/google",
+                        "client_id": settings.GOOGLE_CLIENT_ID,
+                        "client_secret": settings.GOOGLE_CLIENT_SECRET,
+                        "redirect_uri": f"{settings.FRONTEND_URL}/auth/callback/google",
                         "grant_type": "authorization_code"
                     }
                 )
@@ -88,19 +94,19 @@ async def oauth_callback(
                         last_name = profile.get("family_name", "User")
         except Exception as e:
             logger.error(f"Google OAuth failed: {e}")
-            
+
     elif provider == "facebook":
+        if not settings.FACEBOOK_APP_ID or not settings.FACEBOOK_APP_SECRET:
+            raise HTTPException(status_code=501, detail="Facebook OAuth is not configured on this server.")
         try:
             async with httpx.AsyncClient() as client:
-                app_id = settings.FACEBOOK_APP_ID or "fb-app-id-placeholder"
-                app_secret = settings.FACEBOOK_APP_SECRET or "fb-app-secret-placeholder"
-                redirect_uri = settings.FACEBOOK_REDIRECT_URI or "http://localhost:3000/auth/callback/facebook"
+                redirect_uri = settings.FACEBOOK_REDIRECT_URI or f"{settings.FRONTEND_URL}/auth/callback/facebook"
                 token_res = await client.get(
                     "https://graph.facebook.com/v18.0/oauth/access_token",
                     params={
-                        "client_id": app_id,
+                        "client_id": settings.FACEBOOK_APP_ID,
                         "redirect_uri": redirect_uri,
-                        "client_secret": app_secret,
+                        "client_secret": settings.FACEBOOK_APP_SECRET,
                         "code": payload.code
                     }
                 )
@@ -121,10 +127,45 @@ async def oauth_callback(
         except Exception as e:
             logger.error(f"Facebook OAuth failed: {e}")
 
+    elif provider == "microsoft":
+        if not settings.MICROSOFT_CLIENT_ID or not settings.MICROSOFT_CLIENT_SECRET:
+            raise HTTPException(status_code=501, detail="Microsoft OAuth is not configured on this server.")
+        try:
+            async with httpx.AsyncClient() as client:
+                token_res = await client.post(
+                    "https://login.microsoftonline.com/common/oauth2/v2.0/token",
+                    data={
+                        "code": payload.code,
+                        "client_id": settings.MICROSOFT_CLIENT_ID,
+                        "client_secret": settings.MICROSOFT_CLIENT_SECRET,
+                        "redirect_uri": f"{settings.FRONTEND_URL}/auth/callback/microsoft",
+                        "grant_type": "authorization_code",
+                        "scope": "openid profile email User.Read",
+                    }
+                )
+                if token_res.status_code == 200:
+                    access_token = token_res.json().get("access_token")
+                    profile_res = await client.get(
+                        "https://graph.microsoft.com/v1.0/me",
+                        headers={"Authorization": f"Bearer {access_token}"}
+                    )
+                    if profile_res.status_code == 200:
+                        profile = profile_res.json()
+                        email = profile.get("mail") or profile.get("userPrincipalName")
+                        display_name = profile.get("displayName", "Microsoft User")
+                        name_parts = display_name.split(" ", 1)
+                        first_name = profile.get("givenName") or name_parts[0]
+                        last_name = profile.get("surname") or (name_parts[1] if len(name_parts) > 1 else "")
+        except Exception as e:
+            logger.error(f"Microsoft OAuth failed: {e}")
+
+    else:
+        raise HTTPException(status_code=400, detail=f"Unsupported OAuth provider: {provider}")
+
     if not email:
-        email = f"oauth_{provider}_{payload.code[:6]}@example.com"
-        first_name = provider.capitalize()
-        last_name = "Oauth User"
+        # Token exchange or profile fetch failed/returned no email — do not fabricate an
+        # identity and log the caller in anyway; that would be an authentication bypass.
+        raise HTTPException(status_code=400, detail=f"{provider.capitalize()} authentication failed: could not verify identity.")
 
     user_stmt = select(User).where(User.email == email)
     user_res = await db.execute(user_stmt)

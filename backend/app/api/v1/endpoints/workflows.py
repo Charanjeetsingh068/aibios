@@ -1,9 +1,8 @@
 import logging
-from datetime import datetime
 from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
-from sqlalchemy import select, func
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
@@ -26,28 +25,11 @@ def _serialize(wf: Workflow) -> Dict[str, Any]:
     }
 
 
-async def _seed_workflows_if_empty(db: AsyncSession, org_id: str):
-    count_stmt = select(func.count(Workflow.id)).where(Workflow.organization_id == org_id)
-    count_res = await db.execute(count_stmt)
-    if (count_res.scalar() or 0) == 0:
-        defaults = [
-            {"name": "New Lead → AI Qualification Call", "trigger": "Lead Created", "status": "active", "runs": 128},
-            {"name": "Facebook Lead → WhatsApp Welcome", "trigger": "FB Webhook", "status": "active", "runs": 94},
-            {"name": "Meeting Scheduled → CRM Update", "trigger": "Calendar Event", "status": "active", "runs": 47},
-            {"name": "Deal Won → Invoice Generation", "trigger": "Pipeline Stage", "status": "paused", "runs": 22},
-            {"name": "Inactivity 7d → Follow-up SMS", "trigger": "Scheduler (daily)", "status": "active", "runs": 310},
-        ]
-        for item in defaults:
-            db.add(Workflow(organization_id=org_id, **item))
-        await db.commit()
-
-
 @router.get("", response_model=Dict[str, Any])
 async def list_workflows(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    await _seed_workflows_if_empty(db, current_user.organization_id)
     query = (
         select(Workflow)
         .where(Workflow.organization_id == current_user.organization_id)
@@ -149,15 +131,6 @@ async def workflow_history(
     if not wf or wf.organization_id != current_user.organization_id:
         raise HTTPException(status_code=404, detail="Workflow not found")
 
-    # Generate mock history logs
-    import random
-    logs = []
-    statuses = ["completed", "completed", "failed", "completed"]
-    for i in range(1, 5):
-        logs.append({
-            "id": f"run-{i}",
-            "status": random.choice(statuses),
-            "execution_time_ms": random.randint(120, 850),
-            "timestamp": (datetime.utcnow().isoformat() if hasattr(datetime, "utcnow") else "2026-07-08T11:00:00")
-        })
-    return {"history": logs}
+    # No per-run execution log is persisted yet (only the aggregate `runs` counter on the
+    # workflow itself) — return a real empty history rather than fabricated run records.
+    return {"history": []}

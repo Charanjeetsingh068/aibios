@@ -52,7 +52,7 @@ export interface OrganizationDetails {
   smtp_host?: string | null;
   smtp_port?: number | null;
   smtp_user?: string | null;
-  smtp_pass?: string | null;
+  smtp_configured?: boolean;
 }
 
 export interface AuditLogEntry {

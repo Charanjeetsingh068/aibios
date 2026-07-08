@@ -2,12 +2,14 @@
 const nextConfig = {
   reactStrictMode: true,
   poweredByHeader: false,
-  // We can setup rewrites for local dev routing /api directly to FastAPI during local npm run dev
+  // Proxies /api/* to the FastAPI backend. Defaults to local dev; set BACKEND_URL in
+  // production so this doesn't try to reach "localhost" on the deployed host.
   async rewrites() {
+    const backendUrl = process.env.BACKEND_URL || 'http://localhost:8000';
     return [
       {
         source: '/api/:path*',
-        destination: 'http://localhost:8000/api/:path*',
+        destination: `${backendUrl}/api/:path*`,
       },
     ];
   },

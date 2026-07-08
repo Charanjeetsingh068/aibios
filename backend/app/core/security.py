@@ -1,3 +1,6 @@
+import base64
+import hashlib
+import hmac
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Union
 from jose import jwt, JWTError
@@ -29,50 +32,47 @@ def create_access_token(subject: Union[str, Any], expires_delta: Optional[timede
     return encoded_jwt
 
 # ==============================================================================
-# Role-Based Access Control (RBAC) Framework Skeletons
+# Webhook signature verification (Meta Graph API / WhatsApp Cloud API / Twilio)
 # ==============================================================================
 
-class RoleChecker:
+def verify_meta_signature(app_secret: Optional[str], payload: bytes, signature_header: Optional[str]) -> bool:
     """
-    FastAPI dependency that enforces RBAC authorization requirements.
-    
-    Example usage in routes:
-        @router.get("/admin-only", dependencies=[Depends(RoleChecker(["administrator"]))])
+    Validates Meta's X-Hub-Signature-256 header (used by both the Facebook Graph API
+    leadgen webhook and the WhatsApp Cloud API webhook) against the raw request body.
+    Fails closed: returns False if the app secret isn't configured or anything is missing.
     """
-    def __init__(self, allowed_roles: List[str]):
-        self.allowed_roles = allowed_roles
+    if not app_secret or not signature_header:
+        return False
+    try:
+        algo, _, signature = signature_header.partition("=")
+        if algo != "sha256" or not signature:
+            return False
+        expected = hmac.new(app_secret.encode("utf-8"), payload, hashlib.sha256).hexdigest()
+        return hmac.compare_digest(expected, signature)
+    except Exception:
+        return False
 
-    def __call__(self, token: str = Depends(oauth2_scheme)) -> Dict[str, Any]:
-        if not token:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Authentication token is missing.",
-            )
-        try:
-            payload = jwt.decode(token, settings.SECRET_KEY, algorithms=["HS256"])
-            # In Phase 0 initialization, we simulate decoding and checking roles
-            user_roles = payload.get("roles", [])
-            user_id = payload.get("sub")
-            
-            if not user_id:
-                raise HTTPException(
-                    status_code=status.HTTP_401_UNAUTHORIZED,
-                    detail="Invalid token payload.",
-                )
-                
-            # If the user has any of the allowed roles, proceed
-            if any(role in self.allowed_roles for role in user_roles) or "administrator" in user_roles:
-                return {"user_id": user_id, "roles": user_roles}
-                
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Insufficient permissions to access this resource.",
-            )
-        except JWTError:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Could not validate credentials.",
-            )
+
+def verify_twilio_signature(auth_token: Optional[str], full_url: str, params: Dict[str, Any], signature_header: Optional[str]) -> bool:
+    """
+    Validates Twilio's X-Twilio-Signature header per Twilio's documented algorithm:
+    HMAC-SHA1 of the request URL plus each POST param (sorted by key, key+value concatenated),
+    base64-encoded. Fails closed if the auth token isn't configured.
+    Note: `full_url` must exactly match the URL configured in the Twilio console (scheme/host
+    included) — if this app runs behind a reverse proxy, that must preserve the public https URL.
+    """
+    if not auth_token or not signature_header:
+        return False
+    try:
+        data = full_url
+        for key in sorted(params.keys()):
+            data += key + str(params[key])
+        expected = base64.b64encode(
+            hmac.new(auth_token.encode("utf-8"), data.encode("utf-8"), hashlib.sha1).digest()
+        ).decode("utf-8")
+        return hmac.compare_digest(expected, signature_header)
+    except Exception:
+        return False
 
 
 def get_security_headers(environment: str) -> dict[str, str]:

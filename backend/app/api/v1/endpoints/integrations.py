@@ -1,14 +1,18 @@
+import json
 import logging
+import secrets
 from datetime import datetime
 from typing import Any, Dict, List
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.database import get_db
+from app.core.security import verify_meta_signature
 from app.api.v1.endpoints.auth import get_current_user
 from app.models.auth import User
+from app.models.business import Lead
 from app.models.integrations import Integration
 
 logger = logging.getLogger(__name__)
@@ -88,16 +92,10 @@ async def connect_integration(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    import secrets
-    import random
-    import os
-    from app.models.business import Lead
-
     missing = _missing_settings(channel)
-    is_testing = os.getenv("PYTEST_CURRENT_TEST") is not None
-    if is_testing and missing:
+    if missing:
         raise HTTPException(
-            status_code=501,
+            status_code=409,
             detail=f"{channel} integration is not configured on this server. Missing: {missing}",
         )
 
@@ -105,28 +103,7 @@ async def connect_integration(
     row.status = "connected"
     row.external_account_id = f"act_{secrets.token_hex(8)}"
     row.connected_at = datetime.utcnow()
-    row.detail = "Connected successfully via local simulation"
-    await db.commit()
-
-    # Seed 3 dynamic leads from this channel
-    names = ["Aarav Patel", "Priya Sharma", "Aditya Rao", "Ananya Iyer", "Vikram Sen", "Rohan Mehta", "Neha Gupta", "Kabir Singh"]
-    companies = ["Patel Consulting", "Sharma Tech", "Rao & Partners", "Iyer Design", "Sen Corp", "Mehta Ventures", "Gupta Group", "Singh Logistics"]
-    phones = ["+91 98765 43210", "+91 99887 76655", "+91 91234 56789", "+91 93456 78901", "+91 94567 89012", "+91 95678 90123", "+91 96789 01234", "+91 97890 12345"]
-    emails = ["aarav@patel.com", "priya@sharma.com", "aditya@rao.com", "ananya@iyer.com", "vikram@sen.com", "rohan@mehta.com", "neha@gupta.com", "kabir@singh.com"]
-
-    for _ in range(3):
-        idx = random.randint(0, len(names) - 1)
-        lead = Lead(
-            organization_id=current_user.organization_id,
-            name=names[idx],
-            company=companies[idx],
-            phone=phones[idx],
-            email=emails[idx],
-            source=channel,
-            status="new",
-            value=random.randint(1500, 12000),
-        )
-        db.add(lead)
+    row.detail = "Connected"
     await db.commit()
 
     return _serialize(row, [])
@@ -147,8 +124,6 @@ async def disconnect_integration(
     return _serialize(row, _missing_settings(channel))
 
 
-from fastapi import Request, Response, Query
-
 @router.get("/meta/webhook")
 async def verify_meta_webhook(
     hub_mode: str = Query(None, alias="hub.mode"),
@@ -156,8 +131,8 @@ async def verify_meta_webhook(
     hub_verify_token: str = Query(None, alias="hub.verify_token")
 ):
     """Verifies the webhook subscription token for Facebook/Instagram Lead sync."""
-    expected_token = settings.FACEBOOK_WEBHOOK_VERIFY_TOKEN or "facebook_verify_token_default_2026"
-    if hub_mode == "subscribe" and hub_verify_token == expected_token:
+    expected_token = settings.FACEBOOK_WEBHOOK_VERIFY_TOKEN
+    if expected_token and hub_mode == "subscribe" and hub_verify_token == expected_token:
         logger.info("Meta Leadgen webhook verified successfully.")
         return Response(content=hub_challenge, media_type="text/plain")
     else:
@@ -168,10 +143,16 @@ async def verify_meta_webhook(
 @router.post("/meta/webhook")
 async def receive_meta_webhook(request: Request, db: AsyncSession = Depends(get_db)):
     """Receives webhook lead generation events from Meta Pages and Instagram API."""
+    raw_body = await request.body()
+    signature = request.headers.get("x-hub-signature-256")
+    if not verify_meta_signature(settings.FACEBOOK_APP_SECRET, raw_body, signature):
+        logger.warning("Rejected Meta webhook: missing/invalid X-Hub-Signature-256.")
+        raise HTTPException(status_code=401, detail="Invalid webhook signature")
+
     try:
-        body = await request.json()
+        body = json.loads(raw_body)
         logger.info(f"Received Meta Leads webhook: {body}")
-        
+
         entries = body.get("entry", [])
         for entry in entries:
             changes = entry.get("changes", [])
@@ -181,27 +162,34 @@ async def receive_meta_webhook(request: Request, db: AsyncSession = Depends(get_
                     value = change.get("value", {})
                     leadgen_id = value.get("leadgen_id")
                     page_id = value.get("page_id")
-                    
+
                     from app.models.auth import Organization
                     org_stmt = select(Organization).limit(1)
                     org_res = await db.execute(org_stmt)
                     org = org_res.scalar_one_or_none()
-                    
+
                     if org:
+                        # Meta's webhook payload only carries the leadgen_id/page_id — the actual
+                        # submitted form answers (name/phone/email) require a separate call to
+                        # the Lead Retrieval API with a page access token, which isn't configured
+                        # here. Record the lead as a real reference needing manual/API follow-up
+                        # rather than inventing contact details.
                         lead = Lead(
                             organization_id=org.id,
                             name=f"Meta Lead {str(leadgen_id)[-6:] if leadgen_id else 'New'}",
                             company=f"Page {page_id or 'Meta Partner'}",
-                            phone="+1 555-019-9000",
-                            email="meta_sync@example.com",
+                            phone=None,
+                            email=None,
                             source="facebook" if page_id else "instagram",
-                            status="new",
-                            value=1500.0
+                            status="pending",
+                            value=0.0
                         )
                         db.add(lead)
                         await db.commit()
-                        logger.info(f"Successfully synced Meta Leadgen event: {leadgen_id}")
+                        logger.info(f"Recorded Meta Leadgen event pending field retrieval: {leadgen_id}")
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error parsing Meta webhook: {e}")
-        
+
     return {"status": "event_processed"}

@@ -13,6 +13,7 @@ import {
   KeyRound, Link, Star, Award, RefreshCw
 } from 'lucide-react';
 import '../styles/dashboard.css';
+import axiosInstance from '../services/axiosInstance';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   fetchSystemStatus, fetchSystemInfo, fetchDatabaseStatus, fetchAgentStatus, fetchHealth,
@@ -25,6 +26,7 @@ import {
   fetchCampaigns as apiFetchCampaigns, createCampaign as apiCreateCampaign,
   toggleCampaignStatus as apiToggleCampaign, deleteCampaign as apiDeleteCampaign,
   fetchMeetings as apiFetchMeetings, createMeeting as apiCreateMeeting, deleteMeeting as apiDeleteMeeting,
+  updateUser as apiUpdateUser, resetUserPassword as apiResetUserPassword,
   DashboardMetrics, DashboardUser, DashboardRole, OrganizationDetails, AuditLogEntry,
 } from '../services/dashboardService';
 import { fetchLeads, createLead as apiCreateLead, updateLead as apiUpdateLead, deleteLead as apiDeleteLead, fetchLeadEvents, addLeadEvent as apiAddLeadEvent, Lead } from '../services/leadsService';
@@ -33,7 +35,7 @@ import { fetchIntegrations, connectIntegration as apiConnectIntegration } from '
 import { useRealtimeSocket } from '../hooks/useRealtimeSocket';
 import { fetchWorkflows, createWorkflow as apiCreateWorkflow, updateWorkflow as apiUpdateWorkflow, deleteWorkflow as apiDeleteWorkflow, runWorkflow as apiRunWorkflow } from '../services/workflowService';
 import { fetchKbArticles, createKbArticle as apiCreateKbArticle, deleteKbArticle as apiDeleteKbArticle, searchKbArticles as apiSearchKbArticles } from '../services/kbService';
-import { fetchDocuments, uploadDocument as apiUploadDocument, deleteDocument as apiDeleteDocument } from '../services/documentService';
+import { fetchDocuments, uploadDocument as apiUploadDocument, deleteDocument as apiDeleteDocument, getDocumentDownloadUrl } from '../services/documentService';
 import { fetchCallLogs, fetchCallTranscript as apiFetchCallTranscript } from '../services/voiceService';
 import { fetchInvoices, triggerCheckout as apiTriggerCheckout } from '../services/billingService';
 
@@ -106,6 +108,12 @@ const PIPELINE_STAGE_CONFIG = [
   { id: 'negotiation', label: 'Negotiation', color: '#f97316' },
   { id: 'won', label: 'Won', color: '#10b981' },
   { id: 'lost', label: 'Lost', color: '#ef4444' },
+];
+
+const BILLING_PLANS = [
+  { id: 'startup', name: 'Startup', price: '$49', period: '/mo', features: ['3 agent nodes', '1,000 leads/mo', 'Email support'] },
+  { id: 'pro', name: 'Professional', price: '$149', period: '/mo', features: ['10 agent nodes', '10,000 leads/mo', 'Priority support'] },
+  { id: 'enterprise', name: 'Enterprise', price: '$499', period: '/mo', features: ['Unlimited AI agent nodes', 'Unlimited leads', 'All CRM modules', 'WhatsApp + FB + IG', 'Priority SLA support', 'Custom domain', 'Dedicated success manager'] },
 ];
 
 const AI_AGENTS_CONFIG = [
@@ -185,9 +193,11 @@ export default function Dashboard() {
   };
 
   // ── Leads filter ──
+  const LEADS_PAGE_SIZE = 100;
   const [leadsFilter, setLeadsFilter] = useState('all');
   const [leadsSearch, setLeadsSearch] = useState('');
   const [debouncedLeadsSearch, setDebouncedLeadsSearch] = useState('');
+  const [leadsPage, setLeadsPage] = useState(0);
   const [userSearch, setUserSearch] = useState('');
   const [showAddLead, setShowAddLead] = useState(false);
   const [newLead, setNewLead] = useState({ name: '', company: '', phone: '', source: 'manual', value: '' });
@@ -198,6 +208,7 @@ export default function Dashboard() {
   useEffect(() => {
     const handler = setTimeout(() => {
       setDebouncedLeadsSearch(leadsSearch);
+      setLeadsPage(0);
     }, 300);
     return () => clearTimeout(handler);
   }, [leadsSearch]);
@@ -231,10 +242,15 @@ export default function Dashboard() {
   const overview = overviewQuery.data;
 
   const leadsQuery = useQuery({
-    queryKey: ['leads', debouncedLeadsSearch],
-    queryFn: () => fetchLeads({ search: debouncedLeadsSearch || undefined })
+    queryKey: ['leads', debouncedLeadsSearch, leadsPage],
+    queryFn: () => fetchLeads({
+      search: debouncedLeadsSearch || undefined,
+      limit: LEADS_PAGE_SIZE,
+      offset: leadsPage * LEADS_PAGE_SIZE,
+    })
   });
   const leads: Lead[] = leadsQuery.data?.leads ?? [];
+  const leadsTotal = leadsQuery.data?.total ?? 0;
 
   const dealsQuery = useQuery({ queryKey: ['deals'], queryFn: fetchDeals });
   const deals: Deal[] = dealsQuery.data?.deals ?? [];
@@ -459,6 +475,25 @@ export default function Dashboard() {
     });
   }, []);
 
+  const refreshDashboardUsers = () => {
+    fetchDashboardUsers().then(res => setDashboardUsers(res.users)).catch(() => {});
+  };
+
+  const updateUserStatusMutation = useMutation({
+    mutationFn: ({ id, status: newStatus }: { id: string; status: string }) => apiUpdateUser(id, { status: newStatus }),
+    onSuccess: refreshDashboardUsers,
+    onError: (err: any) => pushNotification(err?.response?.data?.detail || 'Failed to update user status'),
+  });
+  const resetPasswordMutation = useMutation({
+    mutationFn: apiResetUserPassword,
+    onSuccess: (res) => pushNotification(`Password reset link generated: ${res.reset_link}`),
+    onError: (err: any) => pushNotification(err?.response?.data?.detail || 'Failed to generate reset link'),
+  });
+
+  const toggleUserSuspend = (u: DashboardUser) => {
+    updateUserStatusMutation.mutate({ id: u.id, status: u.status === 'suspended' ? 'active' : 'suspended' });
+  };
+
   // ─── Handlers ────────────────────────────────────────────────────────────
   const toggleTheme = () => {
     const next = theme === 'dark' ? 'light' : 'dark';
@@ -481,7 +516,7 @@ export default function Dashboard() {
 
   const handleDownloadReport = (reportType: string) => {
     const token = localStorage.getItem('aibos_access_token');
-    const baseUrl = 'http://localhost:8000/api/v1';
+    const baseUrl = axiosInstance.defaults.baseURL || '/api/v1';
     window.open(`${baseUrl}/reports/${reportType}/download?format=csv&token=${token}`, '_blank');
   };
 
@@ -499,7 +534,7 @@ export default function Dashboard() {
       setCallTranscript('Loading transcript...');
       try {
         const res = await apiFetchCallTranscript(callId);
-        setCallTranscript(res.transcript);
+        setCallTranscript(res.transcript ?? res.detail ?? 'No transcript available.');
       } catch {
         setCallTranscript('Failed to retrieve call transcript from backend.');
       }
@@ -1012,6 +1047,17 @@ export default function Dashboard() {
             </tbody>
           </table>
         </div>
+        {leadsTotal > LEADS_PAGE_SIZE && (
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 'var(--space-4)' }}>
+            <span style={{ fontSize: 'var(--font-xs)', color: 'var(--text-tertiary)' }}>
+              Showing {leadsPage * LEADS_PAGE_SIZE + 1}–{Math.min((leadsPage + 1) * LEADS_PAGE_SIZE, leadsTotal)} of {leadsTotal}
+            </span>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button className="btn-secondary" disabled={leadsPage === 0} onClick={() => setLeadsPage(p => Math.max(0, p - 1))}>Previous</button>
+              <button className="btn-secondary" disabled={(leadsPage + 1) * LEADS_PAGE_SIZE >= leadsTotal} onClick={() => setLeadsPage(p => p + 1)}>Next</button>
+            </div>
+          </div>
+        )}
       </div>
     </>
     );
@@ -1061,6 +1107,12 @@ export default function Dashboard() {
         ))}
       </div>
 
+      {dealsQuery.isLoading && (
+        <div className="card" style={{ textAlign: 'center', color: 'var(--text-tertiary)', fontSize: 'var(--font-xs)' }}>Loading pipeline…</div>
+      )}
+      {dealsQuery.isError && (
+        <div className="card" style={{ textAlign: 'center', color: 'var(--danger)', fontSize: 'var(--font-xs)' }}>Failed to load pipeline.</div>
+      )}
       <div className="card" style={{ overflowX: 'auto' }}>
         <div className="kanban-board">
           {PIPELINE_STAGE_CONFIG.map(stage => {
@@ -1125,6 +1177,8 @@ export default function Dashboard() {
           <button type="submit" className="btn-primary"><Plus size={14} /> Add Task</button>
         </form>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
+          {tasksQuery.isLoading && <div style={{ padding: 'var(--space-4)', textAlign: 'center', color: 'var(--text-tertiary)', fontSize: 'var(--font-xs)' }}>Loading tasks…</div>}
+          {tasksQuery.isError && <div style={{ padding: 'var(--space-4)', textAlign: 'center', color: 'var(--danger)', fontSize: 'var(--font-xs)' }}>Failed to load tasks.</div>}
           {tasks.map(task => (
             <div key={task.id} className="task-item">
               <label className="task-item-label">
@@ -1134,7 +1188,7 @@ export default function Dashboard() {
               <button onClick={() => deleteTask(task.id)} className="task-delete-btn"><Trash2 size={14} /></button>
             </div>
           ))}
-          {tasks.length === 0 && <div className="empty-state"><CheckSquare size={32} className="empty-state-icon" /><p className="empty-state-title">No tasks</p><p className="empty-state-desc">Add a task above to get started.</p></div>}
+          {!tasksQuery.isLoading && !tasksQuery.isError && tasks.length === 0 && <div className="empty-state"><CheckSquare size={32} className="empty-state-icon" /><p className="empty-state-title">No tasks</p><p className="empty-state-desc">Add a task above to get started.</p></div>}
         </div>
       </div>
     </>
@@ -1155,7 +1209,9 @@ export default function Dashboard() {
       </div>
       <div className="card">
         <div className="meetings-list" style={{ maxHeight: 'none' }}>
-          {meetings.length === 0 && <div className="empty-state"><Calendar size={32} className="empty-state-icon" /><p className="empty-state-title">No meetings scheduled</p></div>}
+          {meetingsQuery.isLoading && <div style={{ padding: 'var(--space-4)', textAlign: 'center', color: 'var(--text-tertiary)', fontSize: 'var(--font-xs)' }}>Loading meetings…</div>}
+          {meetingsQuery.isError && <div style={{ padding: 'var(--space-4)', textAlign: 'center', color: 'var(--danger)', fontSize: 'var(--font-xs)' }}>Failed to load meetings.</div>}
+          {!meetingsQuery.isLoading && !meetingsQuery.isError && meetings.length === 0 && <div className="empty-state"><Calendar size={32} className="empty-state-icon" /><p className="empty-state-title">No meetings scheduled</p></div>}
           {meetings.map(m => {
             const fm = formatMeeting(m.scheduled_at);
             return (
@@ -1209,7 +1265,9 @@ export default function Dashboard() {
 
       <div className="card">
         <div className="campaigns-list">
-          {campaigns.length === 0 && <div className="empty-state"><Megaphone size={32} className="empty-state-icon" /><p className="empty-state-title">No campaigns yet</p></div>}
+          {campaignsQuery.isLoading && <div style={{ padding: 'var(--space-4)', textAlign: 'center', color: 'var(--text-tertiary)', fontSize: 'var(--font-xs)' }}>Loading campaigns…</div>}
+          {campaignsQuery.isError && <div style={{ padding: 'var(--space-4)', textAlign: 'center', color: 'var(--danger)', fontSize: 'var(--font-xs)' }}>Failed to load campaigns.</div>}
+          {!campaignsQuery.isLoading && !campaignsQuery.isError && campaigns.length === 0 && <div className="empty-state"><Megaphone size={32} className="empty-state-icon" /><p className="empty-state-title">No campaigns yet</p></div>}
           {campaigns.map(c => (
             <div key={c.id} className="campaign-item" style={{ padding: 'var(--space-4)' }}>
               <div className="campaign-info">
@@ -1348,10 +1406,10 @@ export default function Dashboard() {
                 {voiceCalls.map(call => (
                   <Fragment key={call.id}>
                     <tr>
-                      <td><strong>{call.lead_name}</strong></td>
+                      <td><strong>{call.lead_name ?? '—'}</strong></td>
                       <td><span className="role-badge" style={{ textTransform: 'capitalize' }}>{call.direction}</span></td>
-                      <td>{call.duration_seconds}s</td>
-                      <td style={{ fontSize: 'var(--font-xs)', color: 'var(--text-secondary)' }}>{call.transcript_preview}</td>
+                      <td>{call.duration_seconds != null ? `${call.duration_seconds}s` : '—'}</td>
+                      <td style={{ fontSize: 'var(--font-xs)', color: 'var(--text-secondary)' }}>{call.transcript_preview ?? 'Not available'}</td>
                       <td>
                         <button className="btn-secondary" style={{ fontSize: 11, padding: '4px 8px' }} onClick={() => toggleCallExpand(call.id)}>
                           {expandedCallId === call.id ? 'Hide' : 'Transcript'}
@@ -1691,34 +1749,27 @@ workflow.add_conditional_edges(
                 <span style={{ fontSize: 'var(--font-xs)', color: 'var(--text-tertiary)' }}>{row.label}</span>
                 <span style={{ fontSize: 'var(--font-sm)', fontWeight: 'var(--weight-semibold)' }}>{row.value}</span>
               </div>
-            )) : [
-              { label: 'Name', value: 'Demo Corp' },
-              { label: 'Status', value: <span className="status-badge active">active</span> },
-              { label: 'Members', value: dashboardUsers.length || 1 },
-            ].map(row => (
-              <div key={row.label} style={{ display: 'flex', justifyContent: 'space-between', padding: 'var(--space-3)', background: 'var(--bg-tertiary)', borderRadius: 'var(--radius-sm)' }}>
-                <span style={{ fontSize: 'var(--font-xs)', color: 'var(--text-tertiary)' }}>{row.label}</span>
-                <span style={{ fontSize: 'var(--font-sm)', fontWeight: 'var(--weight-semibold)' }}>{row.value}</span>
+            )) : (
+              <div style={{ padding: 'var(--space-4)', textAlign: 'center', color: 'var(--text-tertiary)', fontSize: 'var(--font-xs)' }}>
+                Loading organization details…
               </div>
-            ))}
+            )}
           </div>
         </div>
 
         <div className="card">
           <h3 style={{ marginBottom: 'var(--space-4)' }}>Subscription Plan</h3>
           <div className="billing-plans-grid" style={{ gridTemplateColumns: '1fr' }}>
-            {[
-              { id: 'startup', name: 'Startup', price: '$49', period: '/mo', features: ['3 agent nodes', '1,000 leads/mo', 'Email support'] },
-              { id: 'pro', name: 'Professional', price: '$149', period: '/mo', features: ['10 agent nodes', '10,000 leads/mo', 'Priority support'] },
-              { id: 'enterprise', name: 'Enterprise', price: '$499', period: '/mo', features: ['Unlimited agents', 'Unlimited leads', '24/7 SLA support'] },
-            ].map(plan => (
-              <div key={plan.id} className={`billing-plan-card ${plan.id === 'enterprise' ? 'current' : ''}`}>
+            {BILLING_PLANS.map(plan => {
+              const isCurrent = orgDetails?.subscription_plan === plan.id;
+              return (
+              <div key={plan.id} className={`billing-plan-card ${isCurrent ? 'current' : ''}`}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                   <div>
                     <div className="billing-plan-name">{plan.name}</div>
                     <div className="billing-plan-price">{plan.price}<span>{plan.period}</span></div>
                   </div>
-                  {plan.id === 'enterprise' && <span className="plan-card-badge">Current</span>}
+                  {isCurrent && <span className="plan-card-badge">Current</span>}
                 </div>
                 <div className="billing-plan-features">
                   {plan.features.map(f => (
@@ -1726,8 +1777,14 @@ workflow.add_conditional_edges(
                   ))}
                 </div>
               </div>
-            ))}
+              );
+            })}
           </div>
+          {!orgDetails?.subscription_plan && (
+            <p style={{ fontSize: 'var(--font-xs)', color: 'var(--text-tertiary)', marginTop: 8 }}>
+              No subscription plan set for this organization yet.
+            </p>
+          )}
         </div>
       </div>
     </>
@@ -1770,7 +1827,7 @@ workflow.add_conditional_edges(
                 <td>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                     <div style={{ width: 32, height: 32, borderRadius: '50%', background: 'var(--brand-light)', color: 'var(--brand)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold', fontSize: 'var(--font-xs)' }}>
-                      {u.first_name[0]}{u.last_name[0]}
+                      {(u.first_name?.[0] ?? '?')}{(u.last_name?.[0] ?? '')}
                     </div>
                     <div>
                       <div style={{ fontWeight: 'var(--weight-semibold)' }}>{u.first_name} {u.last_name}</div>
@@ -1785,8 +1842,20 @@ workflow.add_conditional_edges(
                 <td>
                   <div style={{ display: 'flex', gap: 6 }}>
                     <button className="task-delete-btn" style={{ color: 'var(--brand)' }} onClick={() => window.location.href = '/profile'} title="Edit"><Edit2 size={14} /></button>
-                    <button className="task-delete-btn" style={{ color: 'var(--warning)' }} title="Reset Password"><KeyRound size={14} /></button>
-                    <button className="task-delete-btn" style={{ color: 'var(--danger)' }} title="Suspend"><ShieldAlert size={14} /></button>
+                    <button
+                      className="task-delete-btn"
+                      style={{ color: 'var(--warning)' }}
+                      title="Reset Password"
+                      disabled={resetPasswordMutation.isPending}
+                      onClick={() => resetPasswordMutation.mutate(u.id)}
+                    ><KeyRound size={14} /></button>
+                    <button
+                      className="task-delete-btn"
+                      style={{ color: 'var(--danger)' }}
+                      title={u.status === 'suspended' ? 'Reactivate' : 'Suspend'}
+                      disabled={updateUserStatusMutation.isPending}
+                      onClick={() => toggleUserSuspend(u)}
+                    ><ShieldAlert size={14} /></button>
                   </div>
                 </td>
               </tr>
@@ -1807,25 +1876,22 @@ workflow.add_conditional_edges(
 
   // ─── Tab: Roles ───────────────────────────────────────────────────────────
   const renderRoles = () => {
-    const displayRoles = dashboardRoles.length > 0 ? dashboardRoles : [
-      { id: 'super_admin', name: 'Super Admin', description: 'Full system access across all organizations and modules.', permissions: [{ id: 'admin:all', name: 'All Permissions' }], permissions_count: 1 },
-      { id: 'org_admin', name: 'Organization Admin', description: 'Full access within the organization scope.', permissions: [{ id: 'org:all', name: 'Org-wide Access' }], permissions_count: 1 },
-      { id: 'manager', name: 'Manager', description: 'Access to CRM, leads, reports and team management.', permissions: [{ id: 'leads:read', name: 'Read Leads' }, { id: 'leads:write', name: 'Write Leads' }], permissions_count: 4 },
-      { id: 'sales_executive', name: 'Sales Executive', description: 'Access to leads and CRM pipeline management.', permissions: [{ id: 'leads:read', name: 'Read Leads' }], permissions_count: 2 },
-      { id: 'marketing', name: 'Marketing', description: 'Access to campaigns, leads and analytics.', permissions: [{ id: 'campaigns:all', name: 'All Campaigns' }], permissions_count: 3 },
-      { id: 'support', name: 'Support', description: 'Access to customer conversations and tickets.', permissions: [{ id: 'leads:read', name: 'Read Leads' }], permissions_count: 2 },
-      { id: 'finance', name: 'Finance', description: 'Access to billing, invoices and revenue reports.', permissions: [{ id: 'billing:read', name: 'Read Billing' }], permissions_count: 2 },
-      { id: 'developer', name: 'Developer', description: 'Access to API keys, webhooks and developer tools.', permissions: [{ id: 'agents:write', name: 'Write Agents' }], permissions_count: 3 },
-      { id: 'ai_agent', name: 'AI Agent', description: 'Programmatic access for AI agent execution.', permissions: [{ id: 'leads:write', name: 'Write Leads' }], permissions_count: 3 },
-      { id: 'viewer', name: 'Viewer', description: 'Read-only access to dashboard and reports.', permissions: [{ id: 'dashboard:read', name: 'Read Dashboard' }], permissions_count: 1 },
-    ];
+    const displayRoles = dashboardRoles;
 
     return (
       <>
         <div className="module-header">
           <div className="module-title"><h2>Roles & Permissions</h2><span>RBAC configuration — {displayRoles.length} roles defined</span></div>
-          <button className="btn-primary"><Plus size={14} /> Create Role</button>
+          <button className="btn-primary" disabled title="Role creation is not available yet"><Plus size={14} /> Create Role</button>
         </div>
+
+        {displayRoles.length === 0 && (
+          <div className="card">
+            <div style={{ padding: 'var(--space-4)', textAlign: 'center', color: 'var(--text-tertiary)', fontSize: 'var(--font-xs)' }}>
+              Loading roles…
+            </div>
+          </div>
+        )}
 
         <div className="role-cards-grid">
           {displayRoles.map(role => (
@@ -1840,8 +1906,8 @@ workflow.add_conditional_edges(
                 {role.permissions.length > 4 && <span className="perm-chip">+{role.permissions.length - 4} more</span>}
               </div>
               <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 4 }}>
-                <button className="task-delete-btn" style={{ color: 'var(--brand)' }} title="Edit"><Edit2 size={14} /></button>
-                <button className="task-delete-btn" style={{ color: 'var(--danger)' }} title="Delete"><Trash2 size={14} /></button>
+                <button className="task-delete-btn" style={{ color: 'var(--brand)' }} title="Editing role permissions is not available yet" disabled><Edit2 size={14} /></button>
+                <button className="task-delete-btn" style={{ color: 'var(--danger)' }} title="Deleting roles is not available yet" disabled><Trash2 size={14} /></button>
               </div>
             </div>
           ))}
@@ -1851,8 +1917,10 @@ workflow.add_conditional_edges(
   };
 
   // ─── Tab: Billing ─────────────────────────────────────────────────────────
-  const renderBilling = () => (
-    <>
+  const renderBilling = () => {
+    const currentPlan = BILLING_PLANS.find(p => p.id === orgDetails?.subscription_plan);
+    return (
+      <>
       <div className="module-header">
         <div className="module-title"><h2>Billing & Subscription</h2><span>Manage plan, invoices and payment methods</span></div>
       </div>
@@ -1860,54 +1928,56 @@ workflow.add_conditional_edges(
       <div className="dashboard-row-grid">
         <div className="card">
           <h3 style={{ marginBottom: 'var(--space-4)' }}>Current Plan</h3>
-          <div className="billing-plan-card current">
-            <div className="billing-plan-name">Enterprise Plan</div>
-            <div className="billing-plan-price">$499<span>/month</span></div>
-            <div className="billing-plan-features">
-              {['Unlimited AI agent nodes', 'Unlimited leads', 'All CRM modules', 'WhatsApp + FB + IG', 'Priority SLA support', 'Custom domain', 'Dedicated success manager'].map(f => (
-                <div key={f} className="billing-plan-feature"><Check size={14} style={{ color: 'var(--success)' }} />{f}</div>
-              ))}
+          {currentPlan ? (
+            <div className="billing-plan-card current">
+              <div className="billing-plan-name">{currentPlan.name} Plan</div>
+              <div className="billing-plan-price">{currentPlan.price}<span>{currentPlan.period}</span></div>
+              <div className="billing-plan-features">
+                {currentPlan.features.map(f => (
+                  <div key={f} className="billing-plan-feature"><Check size={14} style={{ color: 'var(--success)' }} />{f}</div>
+                ))}
+              </div>
+              <div style={{ marginTop: 'var(--space-4)', display: 'flex', gap: 12 }}>
+                <button
+                  className="btn-primary"
+                  onClick={() => checkoutMutation.mutate({ planId: currentPlan.id, gateway: 'stripe' })}
+                  disabled={checkoutMutation.isPending}
+                >
+                  Pay via Stripe
+                </button>
+                <button
+                  className="btn-secondary"
+                  onClick={() => checkoutMutation.mutate({ planId: currentPlan.id, gateway: 'razorpay' })}
+                  disabled={checkoutMutation.isPending}
+                >
+                  Pay via Razorpay
+                </button>
+              </div>
             </div>
-            <div style={{ marginTop: 'var(--space-4)', display: 'flex', gap: 12 }}>
-              <button
-                className="btn-primary"
-                onClick={() => checkoutMutation.mutate({ planId: 'enterprise', gateway: 'stripe' })}
-                disabled={checkoutMutation.isPending}
-              >
-                Pay via Stripe
-              </button>
-              <button
-                className="btn-secondary"
-                onClick={() => checkoutMutation.mutate({ planId: 'enterprise', gateway: 'razorpay' })}
-                disabled={checkoutMutation.isPending}
-              >
-                Pay via Razorpay
-              </button>
+          ) : (
+            <div style={{ padding: 'var(--space-4)', textAlign: 'center', color: 'var(--text-tertiary)', fontSize: 'var(--font-xs)' }}>
+              No subscription plan set for this organization yet.
             </div>
-          </div>
+          )}
         </div>
 
         <div className="card">
           <h3 style={{ marginBottom: 'var(--space-4)' }}>Usage This Month</h3>
           {[
-            { label: 'AI Tokens Used', used: 2079400, total: 5000000, unit: 'tokens' },
-            { label: 'API Calls', used: metrics?.api_requests_today ?? 1247, total: 50000, unit: 'calls' },
-            { label: 'Storage', used: 2.4, total: 50, unit: 'GB' },
-            { label: 'Active Users', used: metrics?.online_users ?? 1, total: 100, unit: 'seats' },
-          ].map(u => {
-            const pct = Math.min(Math.round((u.used / u.total) * 100), 100);
-            return (
-              <div key={u.label} style={{ marginBottom: 'var(--space-4)' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
-                  <span style={{ fontSize: 'var(--font-sm)', color: 'var(--text-secondary)' }}>{u.label}</span>
-                  <span style={{ fontSize: 'var(--font-xs)', color: 'var(--text-tertiary)' }}>{u.used.toLocaleString()} / {u.total.toLocaleString()} {u.unit}</span>
-                </div>
-                <div className="health-stat-bar-bg">
-                  <div className={`health-stat-bar-fill ${pct < 70 ? 'good' : pct < 90 ? 'warn' : 'bad'}`} style={{ width: `${pct}%` }}></div>
-                </div>
+            { label: 'AI Tokens Used', used: overview?.tokenUsage ?? 0, total: null, unit: 'tokens' },
+            { label: 'API Calls', used: metrics?.api_requests_today ?? 0, total: null, unit: 'calls' },
+            { label: 'Active Users', used: metrics?.online_users ?? 0, total: null, unit: 'seats' },
+          ].map(u => (
+            <div key={u.label} style={{ marginBottom: 'var(--space-4)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
+                <span style={{ fontSize: 'var(--font-sm)', color: 'var(--text-secondary)' }}>{u.label}</span>
+                <span style={{ fontSize: 'var(--font-xs)', color: 'var(--text-tertiary)' }}>{u.used.toLocaleString()} {u.unit}</span>
               </div>
-            );
-          })}
+            </div>
+          ))}
+          <p style={{ fontSize: 'var(--font-xs)', color: 'var(--text-tertiary)' }}>
+            Storage usage is not tracked yet.
+          </p>
         </div>
       </div>
 
@@ -1949,8 +2019,9 @@ workflow.add_conditional_edges(
           </table>
         </div>
       </div>
-    </>
-  );
+      </>
+    );
+  };
 
   // ─── Tab: System Health ───────────────────────────────────────────────────
   const renderSystemHealth = () => (
@@ -2320,8 +2391,7 @@ graph = workflow.compile()`}</pre>
                           style={{ fontSize: 10, padding: '3px 8px' }}
                           onClick={() => {
                             const token = localStorage.getItem('aibos_access_token');
-                            const baseUrl = 'http://localhost:8000/api/v1';
-                            window.open(`${baseUrl}/documents/${doc.id}/download?token=${token}`, '_blank');
+                            window.open(`${getDocumentDownloadUrl(doc.id)}?token=${token}`, '_blank');
                           }}
                         >
                           Download
