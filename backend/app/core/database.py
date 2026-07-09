@@ -310,26 +310,76 @@ async def seed_database(session):
     from app.core.security import get_password_hash
     from sqlalchemy import select
     
-    # 1. Seed Permissions
+    # 1. Seed Permissions — dot notation "module.action" per spec (e.g. "leads.read"),
+    # so the permission catalog can be listed/assigned generically by the role-management
+    # UI instead of the module needing hardcoded knowledge of each permission's shape.
     permissions_data = [
-        {"id": "admin:all", "name": "All Administration", "description": "Unrestricted administrative privilege"},
-        {"id": "org:read", "name": "Read Organization", "description": "Read tenant organization parameters"},
-        {"id": "org:write", "name": "Write Organization", "description": "Modify tenant organization parameters"},
-        {"id": "leads:read", "name": "Read Leads", "description": "Read leads metrics and profiles"},
-        {"id": "leads:write", "name": "Write Leads", "description": "Create and edit lead profiles"},
-        {"id": "agents:read", "name": "Read Agents", "description": "Read LangGraph agent statuses and nodes"},
-        {"id": "agents:write", "name": "Write Agents", "description": "Configure agent flows and tools"},
-        # Enterprise Integration Layer — module-level
-        {"id": "integrations:read", "name": "Read Integrations", "description": "View integration connection status and health"},
-        {"id": "integrations:write", "name": "Write Integrations", "description": "Connect/disconnect integrations and manage their configuration"},
-        # Enterprise Integration Layer — per-integration
-        {"id": "integrations:meta:write", "name": "Manage Meta Integration", "description": "Connect/configure Facebook & Instagram Business integration"},
-        {"id": "integrations:whatsapp:write", "name": "Manage WhatsApp Integration", "description": "Connect/configure WhatsApp Business Cloud API"},
-        {"id": "integrations:voice:write", "name": "Manage Voice Integration", "description": "Connect/configure AI voice providers"},
-        {"id": "integrations:n8n:write", "name": "Manage n8n Integration", "description": "Connect/configure n8n workflow automation"},
-        # AI permissions
-        {"id": "ai:voice:read", "name": "Read AI Voice", "description": "View AI voice library and campaign voice assignments"},
-        {"id": "ai:voice:write", "name": "Write AI Voice", "description": "Manage AI voice library, uploads, and campaign assignments"},
+        {"id": "admin.all", "name": "All Administration", "description": "Unrestricted administrative privilege (super admin wildcard)"},
+        # Organizations (platform-level, super admin only)
+        {"id": "organizations.read", "name": "Read Organizations", "description": "List/view tenant organizations"},
+        {"id": "organizations.write", "name": "Write Organizations", "description": "Create/edit tenant organizations"},
+        {"id": "organizations.delete", "name": "Delete Organizations", "description": "Delete tenant organizations"},
+        {"id": "organizations.suspend", "name": "Suspend Organizations", "description": "Suspend/reactivate tenant organizations"},
+        # Users
+        {"id": "users.read", "name": "Read Users", "description": "List/view users"},
+        {"id": "users.write", "name": "Write Users", "description": "Create/edit users"},
+        {"id": "users.delete", "name": "Delete Users", "description": "Delete (soft-delete) users"},
+        {"id": "users.suspend", "name": "Suspend Users", "description": "Suspend/reactivate users"},
+        {"id": "users.invite", "name": "Invite Users", "description": "Invite new users by email"},
+        {"id": "users.reset_password", "name": "Reset User Password", "description": "Trigger a password reset for another user"},
+        {"id": "users.assign_role", "name": "Assign User Roles", "description": "Assign/remove roles on a user"},
+        # Roles & permissions
+        {"id": "roles.read", "name": "Read Roles", "description": "List/view roles and the permission catalog"},
+        {"id": "roles.write", "name": "Write Roles", "description": "Create/edit roles"},
+        {"id": "roles.delete", "name": "Delete Roles", "description": "Delete roles"},
+        {"id": "roles.assign_permission", "name": "Assign Role Permissions", "description": "Assign/remove permissions on a role"},
+        # Audit
+        {"id": "audit.read", "name": "Read Audit Log", "description": "View audit log entries"},
+        # Integrations — module-level
+        {"id": "integrations.read", "name": "Read Integrations", "description": "View integration connection status and health"},
+        {"id": "integrations.write", "name": "Write Integrations", "description": "Connect/disconnect integrations and manage their configuration"},
+        # Facebook / Instagram
+        {"id": "facebook.read", "name": "Read Facebook", "description": "View Facebook pages, forms, and leads"},
+        {"id": "facebook.write", "name": "Write Facebook", "description": "Connect/configure Facebook Business integration"},
+        {"id": "instagram.read", "name": "Read Instagram", "description": "View Instagram business accounts"},
+        {"id": "instagram.write", "name": "Write Instagram", "description": "Connect/configure Instagram Business integration"},
+        # WhatsApp
+        {"id": "whatsapp.read", "name": "Read WhatsApp", "description": "View WhatsApp numbers, templates, and conversations"},
+        {"id": "whatsapp.write", "name": "Write WhatsApp", "description": "Send WhatsApp messages and manage templates"},
+        {"id": "whatsapp.admin", "name": "Administer WhatsApp", "description": "Register phone numbers, manage webhooks"},
+        # AI Voice
+        {"id": "voice.read", "name": "Read Voice", "description": "View voice library, providers, and call logs"},
+        {"id": "voice.write", "name": "Write Voice", "description": "Manage voice library and campaign voice assignments"},
+        {"id": "voice.admin", "name": "Administer Voice", "description": "Connect/configure AI voice providers"},
+        {"id": "voice.call", "name": "Place AI Voice Calls", "description": "Initiate outbound AI voice calls"},
+        {"id": "voice.train", "name": "Train Voice Agents", "description": "Manage voice agent scripts/training data"},
+        # Automation Engine
+        {"id": "automation.read", "name": "Read Automation", "description": "View workflows and execution history"},
+        {"id": "automation.write", "name": "Write Automation", "description": "Create/edit/run workflows"},
+        {"id": "automation.admin", "name": "Administer Automation", "description": "Manage workflow templates and engine-wide settings"},
+        # CRM (leads/deals)
+        {"id": "crm.read", "name": "Read CRM", "description": "Read leads, deals, and pipeline data"},
+        {"id": "crm.write", "name": "Write CRM", "description": "Create/edit leads and deals"},
+        {"id": "crm.delete", "name": "Delete CRM", "description": "Delete leads and deals"},
+        {"id": "crm.export", "name": "Export CRM", "description": "Export leads/deals to CSV/Excel/PDF"},
+        # Campaigns
+        {"id": "campaign.read", "name": "Read Campaigns", "description": "View campaigns and their analytics"},
+        {"id": "campaign.write", "name": "Write Campaigns", "description": "Create/edit/schedule campaigns"},
+        {"id": "campaign.execute", "name": "Execute Campaigns", "description": "Start/pause/resume/stop/retry campaigns"},
+        # Reports
+        {"id": "reports.read", "name": "Read Reports", "description": "View dashboards and reports"},
+        {"id": "reports.export", "name": "Export Reports", "description": "Export reports to CSV/Excel/PDF"},
+        # Billing
+        {"id": "billing.read", "name": "Read Billing", "description": "View invoices and subscription plan"},
+        {"id": "billing.admin", "name": "Administer Billing", "description": "Manage subscription plans and payment methods"},
+        # Knowledge base
+        {"id": "knowledge.read", "name": "Read Knowledge Base", "description": "Search/view knowledge base documents"},
+        {"id": "knowledge.manage", "name": "Manage Knowledge Base", "description": "Upload/edit/delete knowledge base documents"},
+        # AI Agents
+        {"id": "agents.read", "name": "Read Agents", "description": "Read LangGraph agent statuses and nodes"},
+        {"id": "agents.write", "name": "Write Agents", "description": "Configure agent flows and tools"},
+        # System
+        {"id": "system.health", "name": "View System Health", "description": "View system/database health status"},
     ]
 
     for p in permissions_data:
@@ -340,18 +390,29 @@ async def seed_database(session):
 
     # 2. Seed Roles
     roles_data = [
-        {"id": "super_admin", "name": "Super Admin", "description": "Global administrator control", "permissions": ["admin:all"]},
-        {"id": "org_admin", "name": "Organization Admin", "description": "Tenant administrator control", "permissions": [
-            "org:read", "org:write", "leads:read", "leads:write", "agents:read", "agents:write",
-            "integrations:read", "integrations:write", "integrations:meta:write", "integrations:whatsapp:write",
-            "integrations:voice:write", "integrations:n8n:write", "ai:voice:read", "ai:voice:write",
+        {"id": "super_admin", "name": "Super Admin", "description": "Global administrator control", "permissions": ["admin.all"]},
+        {"id": "org_admin", "name": "Organization Admin", "description": "Tenant administrator control — scoped to their own organization only", "permissions": [
+            "users.read", "users.write", "users.delete", "users.suspend", "users.invite",
+            "users.reset_password", "users.assign_role", "roles.read", "audit.read",
+            "integrations.read", "integrations.write",
+            "facebook.read", "facebook.write", "instagram.read", "instagram.write",
+            "whatsapp.read", "whatsapp.write", "whatsapp.admin",
+            "voice.read", "voice.write", "voice.admin", "voice.call", "voice.train",
+            "automation.read", "automation.write", "automation.admin",
+            "crm.read", "crm.write", "crm.delete", "crm.export",
+            "campaign.read", "campaign.write", "campaign.execute",
+            "reports.read", "reports.export", "billing.read",
+            "knowledge.read", "knowledge.manage", "agents.read", "agents.write",
         ]},
-        {"id": "manager", "name": "Manager", "description": "Team lead manager", "permissions": ["leads:read", "leads:write", "agents:read", "integrations:read", "ai:voice:read"]},
-        {"id": "sales_executive", "name": "Sales Executive", "description": "CRM executive worker", "permissions": ["leads:read", "leads:write"]},
-        {"id": "ai_agent", "name": "AI Agent", "description": "Autonomous worker agent", "permissions": ["leads:read", "leads:write", "agents:read"]},
-        {"id": "developer", "name": "Developer", "description": "Developer node configurer", "permissions": ["agents:read", "agents:write"]},
-        {"id": "auditor", "name": "Auditor", "description": "Security logs auditor", "permissions": ["leads:read", "agents:read", "integrations:read"]},
-        {"id": "viewer", "name": "Viewer", "description": "Read-only access", "permissions": ["leads:read"]}
+        {"id": "manager", "name": "Manager", "description": "Team lead manager", "permissions": [
+            "crm.read", "crm.write", "agents.read", "integrations.read", "voice.read",
+            "campaign.read", "reports.read",
+        ]},
+        {"id": "sales_executive", "name": "Sales Executive", "description": "CRM executive worker", "permissions": ["crm.read", "crm.write", "campaign.read"]},
+        {"id": "ai_agent", "name": "AI Agent", "description": "Autonomous worker agent", "permissions": ["crm.read", "crm.write", "agents.read", "automation.write"]},
+        {"id": "developer", "name": "Developer", "description": "Developer node configurer", "permissions": ["agents.read", "agents.write", "automation.read", "automation.write", "automation.admin"]},
+        {"id": "auditor", "name": "Auditor", "description": "Security logs auditor", "permissions": ["crm.read", "agents.read", "integrations.read", "audit.read", "reports.read"]},
+        {"id": "viewer", "name": "Viewer", "description": "Read-only access", "permissions": ["crm.read"]}
     ]
 
     for r in roles_data:

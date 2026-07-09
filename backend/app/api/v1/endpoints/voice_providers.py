@@ -22,8 +22,8 @@ from app.services.voice.openai_voice import create_realtime_session
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
-require_voice_write = PermissionChecker("ai:voice:write")
-require_voice_read = PermissionChecker("ai:voice:read")
+require_voice_write = PermissionChecker("voice.admin")
+require_voice_read = PermissionChecker("voice.read")
 
 UPLOAD_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))), "uploads")
 os.makedirs(UPLOAD_DIR, exist_ok=True)

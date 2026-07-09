@@ -31,7 +31,4 @@ from app.models.enterprise_integrations import (
     VoiceProviderCredential,
     VoiceLibraryEntry,
     CampaignVoiceAssignment,
-    N8nConnection,
-    N8nWorkflowMapping,
-    N8nExecutionLog,
 )

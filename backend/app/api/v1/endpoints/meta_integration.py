@@ -20,8 +20,8 @@ from app.services.meta_service import MetaNotConfiguredError, MetaAPIError
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
-require_meta_write = PermissionChecker("integrations:meta:write")
-require_integrations_read = PermissionChecker("integrations:read")
+require_meta_write = PermissionChecker("facebook.write")
+require_integrations_read = PermissionChecker("integrations.read")
 
 
 class OAuthCallbackBody(BaseModel):

@@ -14,8 +14,8 @@ from app.services import integration_manager
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
-require_integrations_write = PermissionChecker("integrations:write")
-require_integrations_read = PermissionChecker("integrations:read")
+require_integrations_write = PermissionChecker("integrations.write")
+require_integrations_read = PermissionChecker("integrations.read")
 
 
 @router.get("/health", response_model=Dict[str, Any])

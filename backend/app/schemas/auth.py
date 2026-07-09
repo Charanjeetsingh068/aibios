@@ -1,5 +1,5 @@
 from pydantic import BaseModel, EmailStr, Field
-from typing import Optional
+from typing import List, Optional
 from datetime import datetime
 
 class LoginRequest(BaseModel):
@@ -39,11 +39,19 @@ class UserResponse(BaseModel):
     phone: Optional[str] = None
     status: str
     role_id: str
+    roles: List[str] = []
+    permissions: List[str] = []
     timezone: str
     language: str
+    department: Optional[str] = None
+    designation: Optional[str] = None
+    profile_image: Optional[str] = None
+    email_verified: bool = False
+    mfa_enabled: bool = False
     created_at: datetime
     updated_at: datetime
     last_login: Optional[datetime] = None
+    last_activity: Optional[datetime] = None
 
     class Config:
         from_attributes = True

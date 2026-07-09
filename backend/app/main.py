@@ -10,7 +10,7 @@ from app.core.config import settings
 from app.core.security import get_security_headers
 from app.core import telemetry
 from app.core.realtime import sio
-from app.api.v1.endpoints import health, system, auth, dashboard, leads, deals, integrations, workflows, kb, documents, voice, reports, billing, oauth, whatsapp, twilio_integration, ai, meta_integration, voice_providers, integration_manager, n8n
+from app.api.v1.endpoints import health, system, auth, dashboard, leads, deals, integrations, workflows, kb, documents, voice, reports, billing, oauth, whatsapp, twilio_integration, ai, meta_integration, voice_providers, integration_manager, organizations, users, roles, audit
 from app.core.database import is_postgres_offline, sqlite_engine, postgres_engine, seed_database, SqliteSessionLocal, AsyncSessionLocal, init_mongo_indexes
 from app.models.auth import Base
 from app.models import business as _business_models  # noqa: F401 ensures tables register on Base.metadata
@@ -141,7 +141,10 @@ fastapi_app.include_router(deals.router, prefix=settings.API_V1_STR + "/deals", 
 fastapi_app.include_router(integrations.router, prefix=settings.API_V1_STR + "/integrations", tags=["Integrations"])
 fastapi_app.include_router(meta_integration.router, prefix=settings.API_V1_STR + "/integrations/meta", tags=["Meta Platform Integration"])
 fastapi_app.include_router(integration_manager.router, prefix=settings.API_V1_STR + "/integrations/manager", tags=["Integration Manager"])
-fastapi_app.include_router(n8n.router, prefix=settings.API_V1_STR + "/n8n", tags=["n8n Workflow Automation"])
+fastapi_app.include_router(organizations.router, prefix=settings.API_V1_STR + "/organizations", tags=["Organizations (Super Admin)"])
+fastapi_app.include_router(users.router, prefix=settings.API_V1_STR + "/users", tags=["User Management"])
+fastapi_app.include_router(roles.router, prefix=settings.API_V1_STR + "/roles", tags=["Role Management"])
+fastapi_app.include_router(audit.router, prefix=settings.API_V1_STR + "/audit", tags=["Audit Log"])
 fastapi_app.include_router(workflows.router, prefix=settings.API_V1_STR + "/workflows", tags=["Workflows / Automations"])
 fastapi_app.include_router(kb.router, prefix=settings.API_V1_STR + "/kb", tags=["Knowledge Base"])
 fastapi_app.include_router(documents.router, prefix=settings.API_V1_STR + "/documents", tags=["Documents"])

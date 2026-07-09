@@ -2,17 +2,22 @@ import asyncio
 import logging
 from datetime import datetime
 from typing import Any, Dict, List, Optional
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db, mongo_db
 from app.core.realtime import emit_to_organization
-from app.api.v1.endpoints.auth import get_current_user
+from app.core.audit import record_audit_log
+from app.api.v1.endpoints.auth import get_current_user, PermissionChecker
 from app.models.auth import User
 from app.models.business import Lead
 from app.schemas.leads import LeadCreate, LeadUpdate, LeadEventCreate, VALID_SOURCES, VALID_STATUSES
-from app.services.n8n_service import dispatch_event
+from app.services.event_bus import dispatch_event
+
+require_crm_read = PermissionChecker("crm.read")
+require_crm_write = PermissionChecker("crm.write")
+require_crm_delete = PermissionChecker("crm.delete")
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -84,7 +89,7 @@ async def list_leads(
     search: Optional[str] = Query(None),
     limit: int = Query(100, le=500),
     offset: int = Query(0, ge=0),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_crm_read),
     db: AsyncSession = Depends(get_db),
 ):
     query = select(Lead).where(Lead.organization_id == current_user.organization_id)
@@ -113,7 +118,8 @@ async def list_leads(
 @router.post("", response_model=Dict[str, Any], status_code=status.HTTP_201_CREATED)
 async def create_lead(
     body: LeadCreate,
-    current_user: User = Depends(get_current_user),
+    request: Request,
+    current_user: User = Depends(require_crm_write),
     db: AsyncSession = Depends(get_db),
 ):
     if body.source not in VALID_SOURCES:
@@ -129,8 +135,16 @@ async def create_lead(
         value=body.value,
         campaign_id=body.campaign_id,
         status="new",
+        created_by=current_user.id,
+        updated_by=current_user.id,
     )
     db.add(lead)
+    await db.flush()
+    await record_audit_log(
+        db, actor=current_user, organization_id=lead.organization_id, action="lead.create",
+        description=f"Lead '{lead.name}' created via {lead.source}", resource="leads", resource_id=lead.id,
+        ip_address=request.client.host if request.client else None,
+    )
     await db.commit()
     await db.refresh(lead)
 
@@ -148,7 +162,7 @@ async def create_lead(
 @router.get("/{lead_id}", response_model=Dict[str, Any])
 async def get_lead(
     lead_id: str,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_crm_read),
     db: AsyncSession = Depends(get_db),
 ):
     lead = await db.get(Lead, lead_id)
@@ -161,7 +175,8 @@ async def get_lead(
 async def update_lead(
     lead_id: str,
     body: LeadUpdate,
-    current_user: User = Depends(get_current_user),
+    request: Request,
+    current_user: User = Depends(require_crm_write),
     db: AsyncSession = Depends(get_db),
 ):
     lead = await db.get(Lead, lead_id)
@@ -174,7 +189,13 @@ async def update_lead(
     changes = body.model_dump(exclude_unset=True)
     for field, value in changes.items():
         setattr(lead, field, value)
+    lead.updated_by = current_user.id
 
+    await record_audit_log(
+        db, actor=current_user, organization_id=lead.organization_id, action="lead.update",
+        description=f"Lead '{lead.name}' updated ({', '.join(changes.keys()) or 'no fields'})", resource="leads", resource_id=lead.id,
+        ip_address=request.client.host if request.client else None,
+    )
     await db.commit()
     await db.refresh(lead)
 
@@ -190,13 +211,19 @@ async def update_lead(
 @router.delete("/{lead_id}", response_model=Dict[str, Any])
 async def delete_lead(
     lead_id: str,
-    current_user: User = Depends(get_current_user),
+    request: Request,
+    current_user: User = Depends(require_crm_delete),
     db: AsyncSession = Depends(get_db),
 ):
     lead = await db.get(Lead, lead_id)
     if not lead or lead.organization_id != current_user.organization_id:
         raise HTTPException(status_code=404, detail="Lead not found")
 
+    await record_audit_log(
+        db, actor=current_user, organization_id=lead.organization_id, action="lead.delete",
+        description=f"Lead '{lead.name}' deleted", resource="leads", resource_id=lead.id,
+        ip_address=request.client.host if request.client else None,
+    )
     await db.delete(lead)
     await db.commit()
 
@@ -211,7 +238,7 @@ async def delete_lead(
 @router.get("/{lead_id}/events", response_model=Dict[str, Any])
 async def get_lead_events(
     lead_id: str,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_crm_read),
     db: AsyncSession = Depends(get_db),
 ):
     lead = await db.get(Lead, lead_id)
@@ -239,7 +266,7 @@ async def get_lead_events(
 async def add_lead_event(
     lead_id: str,
     body: LeadEventCreate,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_crm_write),
     db: AsyncSession = Depends(get_db),
 ):
     lead = await db.get(Lead, lead_id)

@@ -83,33 +83,31 @@ async def get_current_user(
         )
     return user
 
-# Helper dependency to check permissions
+# Helper dependency to check permissions.
+# Deliberately no hardcoded role bypass here — roles are dynamic (spec: "no hardcoded
+# permissions"), so "super admin" access is just whichever role(s) currently hold the
+# "admin.all" wildcard permission in the database, nothing more.
 class PermissionChecker:
     def __init__(self, required_permission: str):
         self.required_permission = required_permission
 
     def __call__(self, current_user: User = Depends(get_current_user)) -> User:
-        # Super admins bypass all permission gates
-        if current_user.role_id == "super_admin":
+        permissions = current_user.all_permission_ids()
+        if self.required_permission in permissions or "admin.all" in permissions:
             return current_user
-            
-        # Parse permission strings from user role
-        permissions = [p.id for p in current_user.role.permissions]
-        if self.required_permission in permissions or "admin:all" in permissions:
-            return current_user
-            
+
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Insufficient permissions to access this resource"
         )
 
-# Helper dependency to check roles
+# Helper dependency to check roles (by role id, across primary + additional roles)
 class RoleChecker:
     def __init__(self, allowed_roles: list[str]):
         self.allowed_roles = allowed_roles
 
     def __call__(self, current_user: User = Depends(get_current_user)) -> User:
-        if current_user.role_id in self.allowed_roles or current_user.role_id == "super_admin":
+        if set(current_user.all_role_ids()) & set(self.allowed_roles) or "admin.all" in current_user.all_permission_ids():
             return current_user
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,

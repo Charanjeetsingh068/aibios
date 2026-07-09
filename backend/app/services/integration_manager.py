@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.crypto import decrypt_value, CryptoNotConfiguredError
 from app.models.integrations import Integration
 from app.models.enterprise_integrations import (
-    IntegrationCredential, MetaPage, WhatsAppPhoneNumber, VoiceProviderCredential, N8nConnection,
+    IntegrationCredential, MetaPage, WhatsAppPhoneNumber, VoiceProviderCredential,
 )
 from app.services import meta_service
 from app.services.meta_service import MetaAPIError
@@ -56,9 +56,7 @@ async def get_health(db: AsyncSession, organization_id: str) -> List[Dict[str, A
     for v in result.scalars().all():
         rows.append(_health_row(v.provider, "voice_provider_credential", v.id, v.status, None, v.last_error, None))
 
-    result = await db.execute(select(N8nConnection).where(N8nConnection.organization_id == organization_id))
-    for n in result.scalars().all():
-        rows.append(_health_row("n8n", "n8n_connection", n.id, n.status, None, n.last_error, None))
+
 
     return rows
 
@@ -97,7 +95,7 @@ _RESOURCE_TABLES = {
     "meta_page": MetaPage,
     "whatsapp_phone_number": WhatsAppPhoneNumber,
     "voice_provider_credential": VoiceProviderCredential,
-    "n8n_connection": N8nConnection,
+
 }
 
 

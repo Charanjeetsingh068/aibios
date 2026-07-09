@@ -19,12 +19,12 @@ from app.models.business import Lead
 from app.models.enterprise_integrations import WhatsAppPhoneNumber, WhatsAppMessageLog
 from app.services import whatsapp_service
 from app.services.whatsapp_service import WhatsAppNotConfiguredError, WhatsAppAPIError
-from app.services.n8n_service import dispatch_event
+from app.services.event_bus import dispatch_event
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
-require_whatsapp_write = PermissionChecker("integrations:whatsapp:write")
+require_whatsapp_write = PermissionChecker("whatsapp.admin")
 
 
 class SendWAMessageBody(BaseModel):

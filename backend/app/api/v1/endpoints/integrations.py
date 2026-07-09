@@ -18,7 +18,7 @@ from app.models.integrations import Integration
 from app.models.enterprise_integrations import MetaPage
 from app.services import meta_service
 from app.services.meta_service import MetaAPIError
-from app.services.n8n_service import dispatch_event
+from app.services.event_bus import dispatch_event
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
