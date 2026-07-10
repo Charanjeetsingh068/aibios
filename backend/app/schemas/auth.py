@@ -57,3 +57,15 @@ class UserResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class SessionResponse(BaseModel):
+    id: str
+    device_info: Optional[str] = None
+    ip_address: Optional[str] = None
+    is_active: bool
+    created_at: datetime
+    last_activity: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True

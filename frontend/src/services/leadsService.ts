@@ -12,6 +12,20 @@ export interface Lead {
   value: number;
   campaign_id?: string | null;
   assigned_to?: string | null;
+  meta_lead_id?: string | null;
+  crm_lead_id?: string | null;
+  whatsapp_number?: string | null;
+  facebook_page_id?: string | null;
+  instagram_account_id?: string | null;
+  ad_set?: string | null;
+  ad?: string | null;
+  lead_form?: string | null;
+  country?: string | null;
+  state?: string | null;
+  city?: string | null;
+  address?: string | null;
+  priority: string;
+  score: number;
   created_at: string;
   updated_at: string;
 }
@@ -108,5 +122,22 @@ export async function fetchLeadTags(id: string): Promise<Tag[]> {
 
 export async function addLeadTag(id: string, name: string, color: string = '#CCCCCC'): Promise<{ success: boolean; tag: Tag }> {
   const response = await axiosInstance.post(`/leads/${id}/tags`, { name, color });
+  return response.data;
+}
+
+
+export async function importLeads(file: File): Promise<{ imported: number, errors: string[] }> {
+  const formData = new FormData();
+  formData.append('file', file);
+  const response = await axiosInstance.post('/leads/import', formData, {
+    headers: {
+      'Content-Type': 'multipart/form-data'
+    }
+  });
+  return response.data;
+}
+
+export async function exportLeads(): Promise<{ leads: Lead[] }> {
+  const response = await axiosInstance.get('/leads/export');
   return response.data;
 }

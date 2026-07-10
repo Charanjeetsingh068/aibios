@@ -22,6 +22,10 @@ from app.schemas.leads import (
 )
 from app.services.event_bus import dispatch_event
 
+from app.services.lead_deduplication_service import LeadDeduplicationService
+from app.services.lead_assignment_service import LeadAssignmentService
+
+
 require_crm_read = PermissionChecker("crm.read")
 require_crm_write = PermissionChecker("crm.write")
 require_crm_delete = PermissionChecker("crm.delete")
@@ -49,6 +53,20 @@ def _serialize(lead: Lead) -> Dict[str, Any]:
         "value": float(lead.value or 0),
         "campaign_id": lead.campaign_id,
         "assigned_to": lead.assigned_to,
+        "meta_lead_id": lead.meta_lead_id,
+        "crm_lead_id": lead.crm_lead_id,
+        "whatsapp_number": lead.whatsapp_number,
+        "facebook_page_id": lead.facebook_page_id,
+        "instagram_account_id": lead.instagram_account_id,
+        "ad_set": lead.ad_set,
+        "ad": lead.ad,
+        "lead_form": lead.lead_form,
+        "country": lead.country,
+        "state": lead.state,
+        "city": lead.city,
+        "address": lead.address,
+        "priority": lead.priority,
+        "score": lead.score,
         "created_at": lead.created_at.isoformat() if lead.created_at else None,
         "updated_at": lead.updated_at.isoformat() if lead.updated_at else None,
     }
@@ -141,6 +159,19 @@ async def create_lead(
         source=body.source,
         value=body.value,
         campaign_id=body.campaign_id,
+        meta_lead_id=body.meta_lead_id,
+        crm_lead_id=body.crm_lead_id,
+        whatsapp_number=body.whatsapp_number,
+        facebook_page_id=body.facebook_page_id,
+        instagram_account_id=body.instagram_account_id,
+        ad_set=body.ad_set,
+        ad=body.ad,
+        lead_form=body.lead_form,
+        country=body.country,
+        state=body.state,
+        city=body.city,
+        address=body.address,
+        priority=body.priority,
         status="new",
         created_by=current_user.id,
         updated_by=current_user.id,
@@ -155,6 +186,12 @@ async def create_lead(
     await db.commit()
     await db.refresh(lead)
 
+    # Trigger Duplicate Detection
+    await LeadDeduplicationService.detect_duplicates(db, lead)
+    
+    # Optional Round Robin or Least Busy Assignment could happen here
+    # await LeadAssignmentService.assign_least_busy(db, lead)
+
     await _record_mongo_lead(lead)
     await _record_lead_event(lead.id, lead.organization_id, "created", f"Lead created via {lead.source}", current_user.id)
     await dispatch_event(db, lead.organization_id, "lead.created", {
@@ -164,6 +201,58 @@ async def create_lead(
     payload = _serialize(lead)
     await emit_to_organization(lead.organization_id, "lead:new", payload)
     return payload
+
+
+from fastapi import UploadFile, File
+import csv
+import io
+
+@router.post("/import", response_model=Dict[str, Any])
+async def import_leads(
+    file: UploadFile = File(...),
+    current_user: User = Depends(require_crm_write),
+    db: AsyncSession = Depends(get_db),
+):
+    if not file.filename.endswith(".csv"):
+        raise HTTPException(status_code=400, detail="Invalid file format. Only CSV is allowed.")
+        
+    contents = await file.read()
+    decoded = contents.decode("utf-8")
+    reader = csv.DictReader(io.StringIO(decoded))
+    
+    imported = 0
+    errors = []
+    
+    for row in reader:
+        try:
+            lead = Lead(
+                organization_id=current_user.organization_id,
+                name=row.get("name", "Unknown"),
+                email=row.get("email"),
+                phone=row.get("phone"),
+                source="manual",
+                status="new",
+                created_by=current_user.id,
+                updated_by=current_user.id
+            )
+            db.add(lead)
+            imported += 1
+        except Exception as e:
+            errors.append(str(e))
+            
+    await db.commit()
+    return {"imported": imported, "errors": errors}
+
+@router.get("/export", response_model=Dict[str, Any])
+async def export_leads(
+    current_user: User = Depends(require_crm_read),
+    db: AsyncSession = Depends(get_db),
+):
+    query = select(Lead).where(Lead.organization_id == current_user.organization_id)
+    result = await db.execute(query)
+    leads = result.scalars().all()
+    
+    return {"leads": [_serialize(l) for l in leads]}
 
 
 @router.get("/{lead_id}", response_model=Dict[str, Any])
@@ -205,6 +294,12 @@ async def update_lead(
     )
     await db.commit()
     await db.refresh(lead)
+
+    # Trigger Duplicate Detection
+    await LeadDeduplicationService.detect_duplicates(db, lead)
+    
+    # Optional Round Robin or Least Busy Assignment could happen here
+    # await LeadAssignmentService.assign_least_busy(db, lead)
 
     await _record_mongo_lead(lead)
     if "status" in changes:
@@ -410,3 +505,5 @@ async def add_lead_tag(lead_id: str, body: TagCreate, current_user: User = Depen
     db.add(lead_tag)
     await db.commit()
     return {"success": True, "tag": {"id": tag.id, "name": tag.name, "color": tag.color}}
+
+

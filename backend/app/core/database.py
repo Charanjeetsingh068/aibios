@@ -34,7 +34,7 @@ AsyncSessionLocal = async_sessionmaker(
 # ------------------------------------------------------------------------------
 import os
 
-fallback_db_path = "d:/react-website/aibios/database/postgres/fallback.db"
+fallback_db_path = os.getenv("SQLITE_DB_PATH", "d:/react-website/aibios/database/postgres/fallback.db")
 os.makedirs(os.path.dirname(fallback_db_path), exist_ok=True)
 
 sqlite_engine = create_async_engine(
@@ -71,6 +71,11 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
     """Dependency generator for database sessions in FastAPI routes."""
     use_sqlite = await is_postgres_offline()
     if use_sqlite:
+        import app.models.auth
+        import app.models.business
+        import app.models.integrations
+        import app.models.enterprise_integrations
+        
         from app.models.auth import Base
         async with sqlite_engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)

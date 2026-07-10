@@ -15,6 +15,20 @@ class LeadCreate(BaseModel):
     source: str = Field("manual", max_length=30)
     value: float = 0
     campaign_id: Optional[str] = None
+    meta_lead_id: Optional[str] = None
+    crm_lead_id: Optional[str] = None
+    whatsapp_number: Optional[str] = None
+    facebook_page_id: Optional[str] = None
+    instagram_account_id: Optional[str] = None
+    ad_set: Optional[str] = None
+    ad: Optional[str] = None
+    lead_form: Optional[str] = None
+    country: Optional[str] = None
+    state: Optional[str] = None
+    city: Optional[str] = None
+    address: Optional[str] = None
+    priority: str = Field("medium", max_length=20)
+
 
 
 class LeadUpdate(BaseModel):
@@ -26,6 +40,21 @@ class LeadUpdate(BaseModel):
     value: Optional[float] = None
     campaign_id: Optional[str] = None
     assigned_to: Optional[str] = None
+    meta_lead_id: Optional[str] = None
+    crm_lead_id: Optional[str] = None
+    whatsapp_number: Optional[str] = None
+    facebook_page_id: Optional[str] = None
+    instagram_account_id: Optional[str] = None
+    ad_set: Optional[str] = None
+    ad: Optional[str] = None
+    lead_form: Optional[str] = None
+    country: Optional[str] = None
+    state: Optional[str] = None
+    city: Optional[str] = None
+    address: Optional[str] = None
+    priority: Optional[str] = Field(None, max_length=20)
+    score: Optional[int] = None
+
 
 
 class LeadEventCreate(BaseModel):
@@ -47,6 +76,21 @@ class LeadResponse(BaseModel):
     assigned_to: Optional[str] = None
     created_at: datetime
     updated_at: datetime
+    meta_lead_id: Optional[str] = None
+    crm_lead_id: Optional[str] = None
+    whatsapp_number: Optional[str] = None
+    facebook_page_id: Optional[str] = None
+    instagram_account_id: Optional[str] = None
+    ad_set: Optional[str] = None
+    ad: Optional[str] = None
+    lead_form: Optional[str] = None
+    country: Optional[str] = None
+    state: Optional[str] = None
+    city: Optional[str] = None
+    address: Optional[str] = None
+    priority: str
+    score: int
+
 
     class Config:
         from_attributes = True

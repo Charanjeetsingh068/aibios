@@ -235,3 +235,34 @@ class EmailVerificationToken(Base):
 
     # Relationships
     user: Mapped[User] = relationship("User")
+
+
+class Team(Base):
+    __tablename__ = "teams"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
+    organization_id: Mapped[str] = mapped_column(String(36), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    name: Mapped[str] = mapped_column(String(100), nullable=False)
+    manager_id: Mapped[Optional[str]] = mapped_column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    deleted_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+class TeamMember(Base):
+    __tablename__ = "team_members"
+
+    team_id: Mapped[str] = mapped_column(String(36), ForeignKey("teams.id", ondelete="CASCADE"), primary_key=True)
+    user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    role: Mapped[str] = mapped_column(String(50), default="member") # manager, member
+    joined_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+class VisibilityRule(Base):
+    __tablename__ = "visibility_rules"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
+    organization_id: Mapped[str] = mapped_column(String(36), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    resource_type: Mapped[str] = mapped_column(String(50), nullable=False) # e.g. "leads"
+    resource_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
+    rule_type: Mapped[str] = mapped_column(String(50), nullable=False) # e.g. "team", "organization", "global"
+    target_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True) # team_id or user_id
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
