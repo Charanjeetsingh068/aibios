@@ -2,17 +2,24 @@ import asyncio
 import logging
 from datetime import datetime
 from typing import Any, Dict, List, Optional
+
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
-from sqlalchemy import select, func
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.v1.endpoints.auth import PermissionChecker
+from app.core.audit import record_audit_log
 from app.core.database import get_db, mongo_db
 from app.core.realtime import emit_to_organization
-from app.core.audit import record_audit_log
-from app.api.v1.endpoints.auth import get_current_user, PermissionChecker
 from app.models.auth import User
 from app.models.business import Lead
-from app.schemas.leads import LeadCreate, LeadUpdate, LeadEventCreate, VALID_SOURCES, VALID_STATUSES
+from app.schemas.leads import (
+    VALID_SOURCES,
+    VALID_STATUSES,
+    LeadCreate,
+    LeadEventCreate,
+    LeadUpdate,
+)
 from app.services.event_bus import dispatch_event
 
 require_crm_read = PermissionChecker("crm.read")
@@ -275,3 +282,131 @@ async def add_lead_event(
 
     await _record_lead_event(lead_id, lead.organization_id, body.type, body.note, current_user.id)
     return {"success": True}
+
+
+# ---------------------------------------------------------
+# NEW PHASE 5.4 ROUTES: Bulk Actions, Merge, Sub-resources
+# ---------------------------------------------------------
+
+from app.models.business import LeadHistory, LeadNote, LeadTag, Tag
+from app.schemas.leads import (
+    LeadBulkUpdate,
+    LeadMergeRequest,
+    LeadNoteCreate,
+    LeadNoteResponse,
+    TagCreate,
+    TagResponse,
+)
+
+
+@router.post("/bulk/update", response_model=Dict[str, Any])
+async def bulk_update_leads(
+    body: LeadBulkUpdate,
+    current_user: User = Depends(require_crm_write),
+    db: AsyncSession = Depends(get_db),
+):
+    query = select(Lead).where(Lead.id.in_(body.lead_ids), Lead.organization_id == current_user.organization_id)
+    result = await db.execute(query)
+    leads = result.scalars().all()
+    
+    for lead in leads:
+        if body.status is not None:
+            lead.status = body.status
+        if body.assigned_to is not None:
+            lead.assigned_to = body.assigned_to
+        if body.campaign_id is not None:
+            lead.campaign_id = body.campaign_id
+        lead.updated_by = current_user.id
+        
+    await db.commit()
+    return {"updated": len(leads)}
+
+@router.post("/bulk/delete", response_model=Dict[str, Any])
+async def bulk_delete_leads(
+    body: LeadBulkUpdate, # Reuse schema for lead_ids list
+    current_user: User = Depends(require_crm_delete),
+    db: AsyncSession = Depends(get_db),
+):
+    query = select(Lead).where(Lead.id.in_(body.lead_ids), Lead.organization_id == current_user.organization_id)
+    result = await db.execute(query)
+    leads = result.scalars().all()
+    for lead in leads:
+        await db.delete(lead)
+    await db.commit()
+    return {"deleted": len(leads)}
+
+@router.post("/{lead_id}/merge", response_model=Dict[str, Any])
+async def merge_leads(
+    lead_id: str,
+    body: LeadMergeRequest,
+    current_user: User = Depends(require_crm_write),
+    db: AsyncSession = Depends(get_db),
+):
+    target_lead = await db.get(Lead, lead_id)
+    source_lead = await db.get(Lead, body.source_lead_id)
+    
+    if not target_lead or target_lead.organization_id != current_user.organization_id:
+        raise HTTPException(status_code=404, detail="Target lead not found")
+    if not source_lead or source_lead.organization_id != current_user.organization_id:
+        raise HTTPException(status_code=404, detail="Source lead not found")
+
+    target_lead.phone = target_lead.phone or source_lead.phone
+    target_lead.email = target_lead.email or source_lead.email
+    target_lead.company = target_lead.company or source_lead.company
+    target_lead.value = max(float(target_lead.value or 0), float(source_lead.value or 0))
+
+    await db.delete(source_lead)
+    
+    history = LeadHistory(
+        lead_id=target_lead.id,
+        actor_id=current_user.id,
+        action="merge",
+        old_value=body.source_lead_id,
+        new_value=target_lead.id
+    )
+    db.add(history)
+    
+    await db.commit()
+    return _serialize(target_lead)
+
+@router.get("/{lead_id}/notes", response_model=List[LeadNoteResponse])
+async def get_lead_notes(lead_id: str, current_user: User = Depends(require_crm_read), db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(LeadNote).where(LeadNote.lead_id == lead_id).order_by(LeadNote.created_at.desc()))
+    return result.scalars().all()
+
+@router.post("/{lead_id}/notes", response_model=LeadNoteResponse)
+async def create_lead_note(lead_id: str, body: LeadNoteCreate, current_user: User = Depends(require_crm_write), db: AsyncSession = Depends(get_db)):
+    lead = await db.get(Lead, lead_id)
+    if not lead or lead.organization_id != current_user.organization_id:
+        raise HTTPException(status_code=404, detail="Lead not found")
+    note = LeadNote(lead_id=lead_id, author_id=current_user.id, content=body.content)
+    db.add(note)
+    await db.commit()
+    await db.refresh(note)
+    return note
+
+@router.get("/{lead_id}/tags", response_model=List[TagResponse])
+async def get_lead_tags(lead_id: str, current_user: User = Depends(require_crm_read), db: AsyncSession = Depends(get_db)):
+    result = await db.execute(
+        select(Tag).join(LeadTag, LeadTag.tag_id == Tag.id).where(LeadTag.lead_id == lead_id)
+    )
+    return result.scalars().all()
+
+@router.post("/{lead_id}/tags", response_model=Dict[str, Any])
+async def add_lead_tag(lead_id: str, body: TagCreate, current_user: User = Depends(require_crm_write), db: AsyncSession = Depends(get_db)):
+    lead = await db.get(Lead, lead_id)
+    if not lead or lead.organization_id != current_user.organization_id:
+        raise HTTPException(status_code=404, detail="Lead not found")
+    
+    result = await db.execute(select(Tag).where(Tag.name == body.name, Tag.organization_id == current_user.organization_id))
+    tag = result.scalar_one_or_none()
+    if not tag:
+        tag = Tag(organization_id=current_user.organization_id, name=body.name.strip(), color=body.color)
+        db.add(tag)
+        await db.commit()
+        await db.refresh(tag)
+        
+    lead_tag = LeadTag(lead_id=lead_id, tag_id=tag.id)
+    db.add(lead_tag)
+    await db.commit()
+    return {"success": True, "tag": {"id": tag.id, "name": tag.name, "color": tag.color}}

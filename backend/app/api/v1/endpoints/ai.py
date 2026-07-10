@@ -1,13 +1,14 @@
 import logging
 from typing import List
+
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from app.core.config import settings
 from app.api.v1.endpoints.auth import get_current_user
+from app.core.config import settings
 from app.models.auth import User
-from app.services.openai_service import get_chat_stream, OpenAINotConfiguredError
+from app.services.openai_service import OpenAINotConfiguredError, get_chat_stream
 
 logger = logging.getLogger(__name__)
 router = APIRouter()

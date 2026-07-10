@@ -13,10 +13,16 @@ from alembic import context
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app.core.config import settings
+from app.models import (
+    business as _business_models,  # noqa: F401 registers tables on Base.metadata
+)
+from app.models import (
+    enterprise_integrations as _enterprise_integrations_models,  # noqa: F401 registers tables on Base.metadata
+)
+from app.models import (
+    integrations as _integrations_models,  # noqa: F401 registers tables on Base.metadata
+)
 from app.models.auth import Base
-from app.models import business as _business_models  # noqa: F401 registers tables on Base.metadata
-from app.models import integrations as _integrations_models  # noqa: F401 registers tables on Base.metadata
-from app.models import enterprise_integrations as _enterprise_integrations_models  # noqa: F401 registers tables on Base.metadata
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.

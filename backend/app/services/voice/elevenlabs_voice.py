@@ -1,9 +1,14 @@
 from typing import List, Optional
 
 import httpx
-from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
+from tenacity import (
+    retry,
+    retry_if_exception_type,
+    stop_after_attempt,
+    wait_exponential,
+)
 
-from app.services.voice.base import VoiceProvider, VoiceInfo, VoiceProviderAPIError
+from app.services.voice.base import VoiceInfo, VoiceProvider, VoiceProviderAPIError
 
 REQUEST_TIMEOUT_SECONDS = 30.0
 RETRYABLE_EXCEPTIONS = (httpx.ConnectError, httpx.ConnectTimeout, httpx.ReadTimeout)

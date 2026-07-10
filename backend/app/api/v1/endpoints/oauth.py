@@ -2,19 +2,20 @@ import logging
 import secrets
 from datetime import datetime
 from typing import Any, Dict
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
-from pydantic import BaseModel
+
 import httpx
+from fastapi import APIRouter, Depends, HTTPException, Request
+from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.api.v1.endpoints.auth import issue_session_tokens
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.security import get_password_hash
-from app.api.v1.endpoints.auth import issue_session_tokens
+from app.models.auth import LoginHistory, Organization, User
 from app.schemas.auth import TokenResponse
-from app.models.auth import User, Organization, LoginHistory
 
 logger = logging.getLogger(__name__)
 router = APIRouter()

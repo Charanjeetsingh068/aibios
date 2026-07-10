@@ -4,9 +4,9 @@ from typing import Any, Dict
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.database import get_db
+from app.api.v1.endpoints.auth import PermissionChecker
 from app.core.crypto import CryptoNotConfiguredError
-from app.api.v1.endpoints.auth import get_current_user, PermissionChecker
+from app.core.database import get_db
 from app.models.auth import User
 from app.models.enterprise_integrations import IntegrationCredential
 from app.services import integration_manager

@@ -9,7 +9,7 @@ import {
   CheckSquare, Zap, Bot, BookOpen, File, Megaphone, CreditCard,
   Settings, ScrollText, Code, TrendingUp, TrendingDown,
   LogOut, ChevronRight, Target, Mail,
-  Wifi, Search, UserPlus, Edit2, ShieldAlert,
+  Wifi, Search, UserPlus, Edit2, Edit3, ShieldAlert, 
   KeyRound, Link, Star, Award, RefreshCw
 } from 'lucide-react';
 import '../styles/dashboard.css';
@@ -26,18 +26,23 @@ import {
   fetchCampaigns as apiFetchCampaigns, createCampaign as apiCreateCampaign,
   toggleCampaignStatus as apiToggleCampaign, deleteCampaign as apiDeleteCampaign,
   fetchMeetings as apiFetchMeetings, createMeeting as apiCreateMeeting, deleteMeeting as apiDeleteMeeting,
-  updateUser as apiUpdateUser, resetUserPassword as apiResetUserPassword,
   DashboardMetrics, DashboardUser, DashboardRole, OrganizationDetails, AuditLogEntry,
 } from '../services/dashboardService';
 import { fetchLeads, createLead as apiCreateLead, updateLead as apiUpdateLead, deleteLead as apiDeleteLead, fetchLeadEvents, addLeadEvent as apiAddLeadEvent, Lead } from '../services/leadsService';
 import { fetchDeals, createDeal as apiCreateDeal, updateDeal as apiUpdateDeal, Deal } from '../services/dealsService';
-import { fetchIntegrations, connectIntegration as apiConnectIntegration } from '../services/integrationsService';
+import { fetchIntegrations, connectIntegration as apiConnectIntegration, fetchLeadMappings, createLeadMapping, deleteLeadMapping } from '../services/integrationsService';
 import { useRealtimeSocket } from '../hooks/useRealtimeSocket';
 import { fetchWorkflows, createWorkflow as apiCreateWorkflow, updateWorkflow as apiUpdateWorkflow, deleteWorkflow as apiDeleteWorkflow, runWorkflow as apiRunWorkflow } from '../services/workflowService';
 import { fetchKbArticles, createKbArticle as apiCreateKbArticle, deleteKbArticle as apiDeleteKbArticle, searchKbArticles as apiSearchKbArticles } from '../services/kbService';
 import { fetchDocuments, uploadDocument as apiUploadDocument, deleteDocument as apiDeleteDocument, getDocumentDownloadUrl } from '../services/documentService';
 import { fetchCallLogs, fetchCallTranscript as apiFetchCallTranscript } from '../services/voiceService';
 import { fetchInvoices, triggerCheckout as apiTriggerCheckout } from '../services/billingService';
+
+import { RequirePermission } from '../components/RequirePermission';
+import { Modal } from '../components/Modal';
+import { createRole as apiCreateRole, deleteRole as apiDeleteRole, assignPermission as apiAssignPermission } from '../services/roleService';
+import { inviteUser as apiInviteUser, deleteUser as apiDeleteUser, assignUserRole as apiAssignUserRole, createUser as apiCreateUser, forceUserPassword as apiForceUserPassword, updateUser as apiUpdateUser, suspendUser as apiSuspendUser, reactivateUser as apiReactivateUser, resetUserPassword as apiResetUserPassword } from '../services/userService';
+
 
 // ─── Nav Config ────────────────────────────────────────────────────────────────
 
@@ -187,7 +192,12 @@ export default function Dashboard() {
   const [auditLogs, setAuditLogs] = useState<AuditLogEntry[]>([]);
 
   // ── Real-time notification feed (populated only by live socket events) ──
-  const [notifications, setNotifications] = useState<LiveNotification[]>([]);
+const [notifications, setNotifications] = useState<LiveNotification[]>([]);
+  const [leadMappings, setLeadMappings] = useState<any[]>([]);
+  const [showMappingModal, setShowMappingModal] = useState(false);
+  const [newMappingFormId, setNewMappingFormId] = useState('');
+  const [newMappingMetaField, setNewMappingMetaField] = useState('');
+  const [newMappingCrmField, setNewMappingCrmField] = useState('');
   const pushNotification = (text: string) => {
     setNotifications(prev => [{ id: Date.now(), text, time: 'Just now', unread: true }, ...prev.slice(0, 19)]);
   };
@@ -236,6 +246,113 @@ export default function Dashboard() {
   const [showAddKb, setShowAddKb] = useState(false);
   const [newKbTitle, setNewKbTitle] = useState('');
   const [newKbCategory, setNewKbCategory] = useState('General');
+
+
+  // ── Roles & Users Modals/Forms ──
+
+  // ── Modal States ──
+  const [changeRoleModalUser, setChangeRoleModalUser] = useState<any>(null);
+  const [changeRoleInput, setChangeRoleInput] = useState('');
+  const [assignPermissionRole, setAssignPermissionRole] = useState<any>(null);
+  const [assignPermissionInput, setAssignPermissionInput] = useState('');
+
+  const [deleteConfirmInfo, setDeleteConfirmInfo] = useState<{ type: 'user' | 'role', id: string, name: string } | null>(null);
+
+
+  const [showInviteUser, setShowInviteUser] = useState(false);
+
+
+  const [editUserModal, setEditUserModal] = useState<any>(null);
+  const [editUserFirstName, setEditUserFirstName] = useState('');
+  const [editUserLastName, setEditUserLastName] = useState('');
+  const [editUserEmail, setEditUserEmail] = useState('');
+  const [editUserPhone, setEditUserPhone] = useState('');
+  const [showCreateUser, setShowCreateUser] = useState(false);
+  const [createFirstName, setCreateFirstName] = useState('');
+  const [createLastName, setCreateLastName] = useState('');
+  const [createPassword, setCreatePassword] = useState('');
+  const [forcePasswordUser, setForcePasswordUser] = useState<any>(null);
+  const [forcePasswordInput, setForcePasswordInput] = useState('');
+  const [newUserEmail, setNewUserEmail] = useState('');
+  const [newUserRole, setNewUserRole] = useState('viewer');
+  
+  const [showAddRole, setShowAddRole] = useState(false);
+  const [newRoleName, setNewRoleName] = useState('');
+  const [newRoleDesc, setNewRoleDesc] = useState('');
+
+  
+
+  // Mutations
+
+
+  const editUserMutation = useMutation({
+    mutationFn: ({ id, data }: { id: string, data: any }) => apiUpdateUser(id, data),
+    onSuccess: () => {
+      pushNotification("User updated successfully");
+      setEditUserModal(null);
+      refreshDashboardUsers();
+    },
+    onError: (err: any) => pushNotification(err.response?.data?.detail || "Failed to update user")
+  });
+
+  const createUserMutation = useMutation({
+    mutationFn: (data: any) => apiCreateUser(data),
+    onSuccess: () => {
+      pushNotification("User created successfully");
+      setShowCreateUser(false);
+      setCreateFirstName('');
+      setCreateLastName('');
+      setNewUserEmail('');
+      setCreatePassword('');
+      refreshDashboardUsers();
+    },
+    onError: (err: any) => pushNotification(err.response?.data?.detail || "Failed to create user")
+  });
+
+  const inviteUserMutation = useMutation({
+    mutationFn: apiInviteUser,
+    onSuccess: () => { invalidate('users'); invalidate('overview'); refreshDashboardUsers(); setShowInviteUser(false); setNewUserEmail(''); },
+    onError: (err: any) => pushNotification(err?.response?.data?.detail || 'Failed to invite user')
+  });
+
+  const deleteUserMutation = useMutation({
+    mutationFn: apiDeleteUser,
+    onSuccess: () => { invalidate('users'); invalidate('overview'); refreshDashboardUsers(); },
+    onError: (err: any) => pushNotification(err?.response?.data?.detail || 'Failed to delete user')
+  });
+
+  const createRoleMutation = useMutation({
+    mutationFn: apiCreateRole,
+    onSuccess: () => { 
+      invalidate('roles'); 
+      fetchDashboardRoles().then(r => setDashboardRoles(r.roles));
+      setShowAddRole(false); setNewRoleName(''); setNewRoleDesc(''); 
+    },
+    onError: (err: any) => pushNotification(err?.response?.data?.detail || 'Failed to create role')
+  });
+
+  const deleteRoleMutation = useMutation({
+    mutationFn: apiDeleteRole,
+    onSuccess: () => { 
+      invalidate('roles'); 
+      fetchDashboardRoles().then(r => setDashboardRoles(r.roles));
+    },
+    onError: (err: any) => pushNotification(err?.response?.data?.detail || 'Failed to delete role')
+  });
+  
+  // Handlers
+  const handleInviteUser = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newUserEmail.trim()) return;
+    inviteUserMutation.mutate({ email: newUserEmail.trim(), role_id: newUserRole, first_name: 'Invited', last_name: 'User' });
+  };
+  
+  const handleCreateRole = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newRoleName.trim()) return;
+    const roleId = newRoleName.toLowerCase().replace(/\s+/g, '_');
+    createRoleMutation.mutate({ id: roleId, name: newRoleName.trim(), description: newRoleDesc.trim() });
+  };
 
   // ── Real backend data (React Query) ──
   const overviewQuery = useQuery({ queryKey: ['overview'], queryFn: fetchDashboardOverview, refetchInterval: 30000 });
@@ -480,13 +597,13 @@ export default function Dashboard() {
   };
 
   const updateUserStatusMutation = useMutation({
-    mutationFn: ({ id, status: newStatus }: { id: string; status: string }) => apiUpdateUser(id, { status: newStatus }),
+    mutationFn: ({ id, status: newStatus }: { id: string; status: string }) => newStatus === 'suspended' ? apiSuspendUser(id) : apiReactivateUser(id),
     onSuccess: refreshDashboardUsers,
     onError: (err: any) => pushNotification(err?.response?.data?.detail || 'Failed to update user status'),
   });
   const resetPasswordMutation = useMutation({
     mutationFn: apiResetUserPassword,
-    onSuccess: (res) => pushNotification(res.email_sent ? 'Password reset email sent.' : `Reset link generated (email not sent — check SMTP config): ${res.reset_link}`),
+    onSuccess: (res) => pushNotification(res.email_sent ? 'Password reset email sent.' : `Reset link generated: ${res.reset_link}`),
     onError: (err: any) => pushNotification(err?.response?.data?.detail || 'Failed to generate reset link'),
   });
 
@@ -1800,9 +1917,21 @@ workflow.add_conditional_edges(
             <Search size={14} className="search-input-icon" />
             <input className="search-input" placeholder="Search users..." value={userSearch} onChange={e => setUserSearch(e.target.value)} style={{ width: 200 }} />
           </div>
-          <button className="btn-primary" onClick={() => window.location.href = '/profile'}><UserPlus size={14} /> Invite User</button>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <RequirePermission permission="users.invite">
+              <button className="btn-primary" onClick={() => setShowInviteUser(true)}>
+                <UserPlus size={14} /> Invite User
+              </button>
+            </RequirePermission>
+            <RequirePermission permission="users.write">
+              <button className="btn-secondary" onClick={() => setShowCreateUser(true)}>
+                <UserPlus size={14} /> Create User
+              </button>
+            </RequirePermission>
+          </div>
         </div>
       </div>
+
 
       <div className="module-stats-row" style={{ gridTemplateColumns: 'repeat(4,1fr)', marginBottom: 'var(--space-4)' }}>
         {[
@@ -1841,21 +1970,42 @@ workflow.add_conditional_edges(
                 <td style={{ fontSize: 'var(--font-xs)', color: 'var(--text-tertiary)' }}>{u.created_at ? new Date(u.created_at).toLocaleDateString() : 'N/A'}</td>
                 <td>
                   <div style={{ display: 'flex', gap: 6 }}>
-                    <button className="task-delete-btn" style={{ color: 'var(--brand)' }} onClick={() => window.location.href = '/profile'} title="Edit"><Edit2 size={14} /></button>
-                    <button
-                      className="task-delete-btn"
-                      style={{ color: 'var(--warning)' }}
-                      title="Reset Password"
-                      disabled={resetPasswordMutation.isPending}
-                      onClick={() => resetPasswordMutation.mutate(u.id)}
-                    ><KeyRound size={14} /></button>
-                    <button
-                      className="task-delete-btn"
-                      style={{ color: 'var(--danger)' }}
-                      title={u.status === 'suspended' ? 'Reactivate' : 'Suspend'}
-                      disabled={updateUserStatusMutation.isPending}
-                      onClick={() => toggleUserSuspend(u)}
-                    ><ShieldAlert size={14} /></button>
+                    <RequirePermission permission="users.write">
+                      <button className="task-delete-btn" style={{ color: 'var(--brand)' }} onClick={() => {
+                        setEditUserModal(u);
+                        setEditUserFirstName(u.first_name);
+                        setEditUserLastName(u.last_name);
+                        setEditUserEmail(u.email);
+                        setEditUserPhone(u.phone || '');
+                      }} title="Edit User"><Edit3 size={14} /></button>
+                    </RequirePermission>
+                    <RequirePermission permission="users.reset_password">
+                      <button
+                        className="task-delete-btn"
+                        style={{ color: 'var(--warning)' }}
+                        title="Reset Password"
+                        disabled={resetPasswordMutation.isPending}
+                        onClick={() => resetPasswordMutation.mutate(u.id)}
+                      ><KeyRound size={14} /></button>
+                    </RequirePermission>
+                    <RequirePermission permission="users.suspend">
+                      <button
+                        className="task-delete-btn"
+                        style={{ color: 'var(--danger)' }}
+                        title={u.status === 'suspended' ? 'Reactivate' : 'Suspend'}
+                        disabled={updateUserStatusMutation.isPending}
+                        onClick={() => toggleUserSuspend(u)}
+                      ><ShieldAlert size={14} /></button>
+                    </RequirePermission>
+                    <RequirePermission permission="users.delete">
+                      <button
+                        className="task-delete-btn"
+                        style={{ color: 'var(--danger)' }}
+                        title="Delete User"
+                        disabled={deleteUserMutation.isPending}
+                        onClick={() => setDeleteConfirmInfo({ type: 'user', id: u.id, name: u.first_name })}
+                      ><Trash2 size={14} /></button>
+                    </RequirePermission>
                   </div>
                 </td>
               </tr>
@@ -1882,8 +2032,14 @@ workflow.add_conditional_edges(
       <>
         <div className="module-header">
           <div className="module-title"><h2>Roles & Permissions</h2><span>RBAC configuration — {displayRoles.length} roles defined</span></div>
-          <button className="btn-primary" disabled title="Role creation is not available yet"><Plus size={14} /> Create Role</button>
+          <RequirePermission permission="roles.write">
+            <button className="btn-primary" onClick={() => setShowAddRole(true)}>
+              <Plus size={14} /> Create Role
+            </button>
+          </RequirePermission>
         </div>
+        
+
 
         {displayRoles.length === 0 && (
           <div className="card">
@@ -1906,8 +2062,15 @@ workflow.add_conditional_edges(
                 {role.permissions.length > 4 && <span className="perm-chip">+{role.permissions.length - 4} more</span>}
               </div>
               <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 4 }}>
-                <button className="task-delete-btn" style={{ color: 'var(--brand)' }} title="Editing role permissions is not available yet" disabled><Edit2 size={14} /></button>
-                <button className="task-delete-btn" style={{ color: 'var(--danger)' }} title="Deleting roles is not available yet" disabled><Trash2 size={14} /></button>
+                <RequirePermission permission="roles.assign_permission">
+                  <button className="task-delete-btn" style={{ color: 'var(--brand)' }} title="Assign Permission" onClick={() => {
+                    setAssignPermissionRole(role);
+                    setAssignPermissionInput('');
+                  }}><Edit2 size={14} /></button>
+                </RequirePermission>
+                <RequirePermission permission="roles.delete">
+                  <button className="task-delete-btn" style={{ color: 'var(--danger)' }} title="Delete Role" onClick={() => setDeleteConfirmInfo({ type: 'role', id: role.id, name: role.name })}><Trash2 size={14} /></button>
+                </RequirePermission>
               </div>
             </div>
           ))}
@@ -2552,6 +2715,252 @@ graph = workflow.compile()`}</pre>
           {activeTab === 'calendar'       && renderMeetings()}
         </div>
       </main>
+
+      {/* ── Modals ── */}
+      <Modal isOpen={showInviteUser} onClose={() => setShowInviteUser(false)} title="Invite User">
+        <form onSubmit={handleInviteUser} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            <label style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>Email Address</label>
+            <input type="email" className="task-input-field" value={newUserEmail} onChange={e => setNewUserEmail(e.target.value)} required placeholder="user@company.com" />
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            <label style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>Assign Role</label>
+            <select className="task-input-field" value={newUserRole} onChange={e => setNewUserRole(e.target.value)}>
+              {dashboardRoles.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
+            </select>
+          </div>
+          <button type="submit" className="btn-primary" style={{ marginTop: 8 }} disabled={inviteUserMutation.isPending}>
+            {inviteUserMutation.isPending ? 'Sending...' : 'Send Invite'}
+          </button>
+        </form>
+      </Modal>
+
+      <Modal isOpen={showAddRole} onClose={() => setShowAddRole(false)} title="Create New Role">
+        <form onSubmit={handleCreateRole} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            <label style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>Role Name</label>
+            <input type="text" className="task-input-field" value={newRoleName} onChange={e => setNewRoleName(e.target.value)} required placeholder="e.g. Project Manager" />
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            <label style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>Description</label>
+            <input type="text" className="task-input-field" value={newRoleDesc} onChange={e => setNewRoleDesc(e.target.value)} placeholder="Optional description..." />
+          </div>
+          <button type="submit" className="btn-primary" style={{ marginTop: 8 }} disabled={createRoleMutation.isPending}>
+            {createRoleMutation.isPending ? 'Saving...' : 'Create Role'}
+          </button>
+        </form>
+      </Modal>
+
+      <Modal isOpen={!!changeRoleModalUser} onClose={() => setChangeRoleModalUser(null)} title={`Change Role: ${changeRoleModalUser?.first_name}`}>
+        <form onSubmit={(e) => {
+          e.preventDefault();
+          if(!changeRoleInput.trim()) return;
+          apiAssignUserRole(changeRoleModalUser.id, changeRoleInput.trim()).then(() => {
+            refreshDashboardUsers();
+            setChangeRoleModalUser(null);
+          }).catch(err => pushNotification(err.message || 'Failed to update role'));
+        }} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            <label style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>Select New Role</label>
+            <select className="task-input-field" value={changeRoleInput} onChange={e => setChangeRoleInput(e.target.value)}>
+              {dashboardRoles.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
+            </select>
+          </div>
+          <button type="submit" className="btn-primary" style={{ marginTop: 8 }}>
+            Save Changes
+          </button>
+        </form>
+      </Modal>
+
+      <Modal isOpen={!!assignPermissionRole} onClose={() => setAssignPermissionRole(null)} title={`Assign Permission to ${assignPermissionRole?.name}`}>
+        <form onSubmit={(e) => {
+          e.preventDefault();
+          if(!assignPermissionInput.trim()) return;
+          apiAssignPermission(assignPermissionRole.id, assignPermissionInput.trim()).then(() => {
+            invalidate('roles');
+            fetchDashboardRoles().then(r => setDashboardRoles(r.roles));
+            setAssignPermissionRole(null);
+          }).catch(err => pushNotification(err.response?.data?.detail || "Error assigning role"));
+        }} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            <label style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>Permission ID</label>
+            <input type="text" className="task-input-field" value={assignPermissionInput} onChange={e => setAssignPermissionInput(e.target.value)} required placeholder="e.g. users.read" />
+          </div>
+          <button type="submit" className="btn-primary" style={{ marginTop: 8 }}>
+            Assign Permission
+          </button>
+        </form>
+      </Modal>
+
+
+      <Modal isOpen={!!deleteConfirmInfo} onClose={() => setDeleteConfirmInfo(null)} title={`Confirm Deletion`}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <p style={{ margin: 0, fontSize: '14px', color: 'var(--text-secondary)' }}>
+            Are you sure you want to delete the {deleteConfirmInfo?.type} <strong>{deleteConfirmInfo?.name}</strong>? This action cannot be undone.
+          </p>
+          <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+            <button className="btn-secondary" onClick={() => setDeleteConfirmInfo(null)}>Cancel</button>
+            <button className="btn-primary" style={{ backgroundColor: 'var(--danger)', borderColor: 'var(--danger)' }} onClick={() => {
+              if (deleteConfirmInfo?.type === 'user') deleteUserMutation.mutate(deleteConfirmInfo.id);
+              if (deleteConfirmInfo?.type === 'role') deleteRoleMutation.mutate(deleteConfirmInfo.id);
+              setDeleteConfirmInfo(null);
+            }}>
+              Confirm Delete
+            </button>
+          </div>
+        </div>
+      </Modal>
+
+
+      <Modal isOpen={showCreateUser} onClose={() => setShowCreateUser(false)} title="Create New User">
+        <form onSubmit={(e) => {
+          e.preventDefault();
+          createUserMutation.mutate({
+            first_name: createFirstName,
+            last_name: createLastName,
+            email: newUserEmail,
+            password: createPassword,
+            role_id: newUserRole
+          });
+        }} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4, flex: 1 }}>
+              <label style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>First Name</label>
+              <input type="text" className="task-input-field" value={createFirstName} onChange={e => setCreateFirstName(e.target.value)} required />
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4, flex: 1 }}>
+              <label style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>Last Name</label>
+              <input type="text" className="task-input-field" value={createLastName} onChange={e => setCreateLastName(e.target.value)} required />
+            </div>
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            <label style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>Email</label>
+            <input type="email" className="task-input-field" value={newUserEmail} onChange={e => setNewUserEmail(e.target.value)} required />
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            <label style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>Password</label>
+            <input type="password" minLength={8} className="task-input-field" value={createPassword} onChange={e => setCreatePassword(e.target.value)} required />
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            <label style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>Role</label>
+            <select className="task-input-field" value={newUserRole} onChange={e => setNewUserRole(e.target.value)}>
+              {dashboardRoles.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
+            </select>
+          </div>
+          <button type="submit" className="btn-primary" style={{ marginTop: 8 }} disabled={createUserMutation.isPending}>
+            {createUserMutation.isPending ? 'Creating...' : 'Create User'}
+          </button>
+        </form>
+      </Modal>
+
+      <Modal isOpen={!!forcePasswordUser} onClose={() => setForcePasswordUser(null)} title={`Set Password: ${forcePasswordUser?.email}`}>
+        <form onSubmit={(e) => {
+          e.preventDefault();
+          if(!forcePasswordInput.trim() || forcePasswordInput.length < 8) {
+            pushNotification("Password must be at least 8 characters");
+            return;
+          }
+          apiForceUserPassword(forcePasswordUser.id, forcePasswordInput).then(() => {
+            pushNotification('Password updated successfully');
+            setForcePasswordUser(null);
+          }).catch(err => pushNotification(err.response?.data?.detail || "Error updating password"));
+        }} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            <label style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>New Password</label>
+            <input type="password" minLength={8} className="task-input-field" value={forcePasswordInput} onChange={e => setForcePasswordInput(e.target.value)} required placeholder="Min 8 characters" />
+          </div>
+          <button type="submit" className="btn-primary" style={{ marginTop: 8 }}>
+            Force Set Password
+          </button>
+        </form>
+      </Modal>
+
+
+      
+      <Modal isOpen={showMappingModal} onClose={() => setShowMappingModal(false)} title="Meta Lead Mappings">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <div className="data-table-wrapper">
+            <table className="data-table">
+              <thead><tr><th>Form ID</th><th>Meta Field</th><th>CRM Field</th><th>Action</th></tr></thead>
+              <tbody>
+                {leadMappings.map(m => (
+                  <tr key={m.id}>
+                    <td>{m.form_id}</td>
+                    <td>{m.meta_field}</td>
+                    <td>{m.crm_field}</td>
+                    <td>
+                      <button className="task-delete-btn" style={{ color: 'var(--danger)' }} onClick={() => {
+                        deleteLeadMapping(m.id).then(() => fetchLeadMappings().then(res => setLeadMappings(res.mappings)));
+                      }}><Trash2 size={14} /></button>
+                    </td>
+                  </tr>
+                ))}
+                {leadMappings.length === 0 && <tr><td colSpan={4} style={{ textAlign: 'center' }}>No mappings configured.</td></tr>}
+              </tbody>
+            </table>
+          </div>
+          <h4 style={{ margin: 0 }}>Add New Mapping</h4>
+          <form onSubmit={(e) => {
+            e.preventDefault();
+            createLeadMapping({ form_id: newMappingFormId, meta_field: newMappingMetaField, crm_field: newMappingCrmField })
+              .then(() => {
+                setNewMappingFormId(''); setNewMappingMetaField(''); setNewMappingCrmField('');
+                fetchLeadMappings().then(res => setLeadMappings(res.mappings));
+              }).catch(err => pushNotification("Failed to add mapping"));
+          }} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <input type="text" className="task-input-field" placeholder="Form ID (or * for all)" value={newMappingFormId} onChange={e => setNewMappingFormId(e.target.value)} required />
+              <input type="text" className="task-input-field" placeholder="Meta Field (e.g. first_name)" value={newMappingMetaField} onChange={e => setNewMappingMetaField(e.target.value)} required />
+              <select className="task-input-field" value={newMappingCrmField} onChange={e => setNewMappingCrmField(e.target.value)} required>
+                <option value="" disabled>Select CRM Field...</option>
+                <option value="name">Name</option>
+                <option value="email">Email</option>
+                <option value="phone">Phone</option>
+                <option value="company">Company</option>
+              </select>
+            </div>
+            <button type="submit" className="btn-primary" style={{ alignSelf: 'flex-start' }}>Add Mapping</button>
+          </form>
+        </div>
+      </Modal>
+
+      <Modal isOpen={!!editUserModal} onClose={() => setEditUserModal(null)} title={`Edit User: ${editUserModal?.email}`}>
+        <form onSubmit={(e) => {
+          e.preventDefault();
+          editUserMutation.mutate({
+            id: editUserModal.id,
+            data: {
+              first_name: editUserFirstName,
+              last_name: editUserLastName,
+              email: editUserEmail,
+              phone: editUserPhone,
+            }
+          });
+        }} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4, flex: 1 }}>
+              <label style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>First Name</label>
+              <input type="text" className="task-input-field" value={editUserFirstName} onChange={e => setEditUserFirstName(e.target.value)} required />
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4, flex: 1 }}>
+              <label style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>Last Name</label>
+              <input type="text" className="task-input-field" value={editUserLastName} onChange={e => setEditUserLastName(e.target.value)} required />
+            </div>
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            <label style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>Email</label>
+            <input type="email" className="task-input-field" value={editUserEmail} onChange={e => setEditUserEmail(e.target.value)} required />
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            <label style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>Phone (Optional)</label>
+            <input type="text" className="task-input-field" value={editUserPhone} onChange={e => setEditUserPhone(e.target.value)} />
+          </div>
+          <button type="submit" className="btn-primary" style={{ marginTop: 8 }} disabled={editUserMutation.isPending}>
+            {editUserMutation.isPending ? 'Saving...' : 'Save Changes'}
+          </button>
+        </form>
+      </Modal>
+
     </div>
   );
 }

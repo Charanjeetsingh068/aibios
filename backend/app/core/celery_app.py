@@ -1,5 +1,7 @@
 import logging
+
 from celery import Celery
+
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
@@ -55,8 +57,14 @@ def refresh_expiring_credentials_task():
     to actually fire on the schedule above — see docs/integration-layer/integration-manager.md."""
     import asyncio
     from datetime import datetime, timedelta
+
     from sqlalchemy import select
-    from app.core.database import is_postgres_offline, AsyncSessionLocal, SqliteSessionLocal
+
+    from app.core.database import (
+        AsyncSessionLocal,
+        SqliteSessionLocal,
+        is_postgres_offline,
+    )
     from app.models.enterprise_integrations import IntegrationCredential
     from app.services.integration_manager import refresh_meta_credential
 

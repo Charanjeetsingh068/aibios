@@ -2,13 +2,13 @@ import logging
 from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, Depends
-from sqlalchemy import select, func
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.v1.endpoints.auth import PermissionChecker
 from app.core.database import get_db
-from app.core.pagination import PageParams, pagination_params, apply_sort
-from app.api.v1.endpoints.auth import get_current_user, PermissionChecker
-from app.models.auth import User, AuditLog
+from app.core.pagination import PageParams, apply_sort, pagination_params
+from app.models.auth import AuditLog, User
 
 logger = logging.getLogger(__name__)
 router = APIRouter()

@@ -3,9 +3,15 @@ from typing import Any, Dict, List, Optional
 from urllib.parse import urlencode
 
 import httpx
-from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
+from tenacity import (
+    retry,
+    retry_if_exception_type,
+    stop_after_attempt,
+    wait_exponential,
+)
 
 from app.core.config import settings
+from app.core.retry import with_retry
 
 logger = logging.getLogger(__name__)
 
@@ -70,6 +76,7 @@ def build_oauth_url(state: str) -> str:
     wait=wait_exponential(multiplier=1, min=1, max=8),
     retry=retry_if_exception_type(RETRYABLE_EXCEPTIONS),
 )
+@with_retry(max_retries=3)
 async def _get(path: str, params: Dict[str, Any]) -> Dict[str, Any]:
     async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT_SECONDS) as client:
         res = await client.get(f"{GRAPH_API_BASE}{path}", params=params)
@@ -86,6 +93,7 @@ async def _get(path: str, params: Dict[str, Any]) -> Dict[str, Any]:
     wait=wait_exponential(multiplier=1, min=1, max=8),
     retry=retry_if_exception_type(RETRYABLE_EXCEPTIONS),
 )
+@with_retry(max_retries=3)
 async def _post(path: str, params: Dict[str, Any]) -> Dict[str, Any]:
     async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT_SECONDS) as client:
         res = await client.post(f"{GRAPH_API_BASE}{path}", params=params)

@@ -8,14 +8,19 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.v1.endpoints.auth import PermissionChecker
+from app.core.crypto import CryptoNotConfiguredError, decrypt_value, encrypt_value
 from app.core.database import get_db
-from app.core.crypto import encrypt_value, decrypt_value, CryptoNotConfiguredError
-from app.api.v1.endpoints.auth import get_current_user, PermissionChecker
 from app.models.auth import User
+from app.models.enterprise_integrations import (
+    IntegrationCredential,
+    MetaLeadForm,
+    MetaPage,
+    OAuthSession,
+)
 from app.models.integrations import Integration
-from app.models.enterprise_integrations import IntegrationCredential, MetaPage, MetaLeadForm
 from app.services import meta_service
-from app.services.meta_service import MetaNotConfiguredError, MetaAPIError
+from app.services.meta_service import MetaAPIError, MetaNotConfiguredError
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -66,12 +71,21 @@ def _require_user_token(credential: Optional[IntegrationCredential]) -> str:
 
 
 @router.get("/oauth/url", response_model=Dict[str, Any])
-async def get_meta_oauth_url(current_user: User = Depends(require_meta_write)):
-    """Returns a real Meta OAuth dialog URL with business-integration scopes
-    (pages_show_list, leads_retrieval, business_management, instagram_basic, ...)."""
+async def get_meta_oauth_url(current_user: User = Depends(require_meta_write), db: AsyncSession = Depends(get_db)):
+    """Returns a real Meta OAuth dialog URL with business-integration scopes."""
     try:
         state = secrets.token_urlsafe(24)
         url = meta_service.build_oauth_url(state)
+        
+        session = OAuthSession(
+            organization_id=current_user.organization_id,
+            user_id=current_user.id,
+            state=state,
+            provider="facebook"
+        )
+        db.add(session)
+        await db.commit()
+        
         return {"url": url, "state": state}
     except MetaNotConfiguredError as e:
         raise HTTPException(status_code=503, detail=str(e))
@@ -83,9 +97,18 @@ async def meta_oauth_callback(
     current_user: User = Depends(require_meta_write),
     db: AsyncSession = Depends(get_db),
 ):
-    """Exchanges the OAuth code for a real long-lived user access token and stores it
-    (encrypted) for this organization. This is the real replacement for the previous
-    fake `secrets.token_hex(8)` external_account_id."""
+    """Exchanges the OAuth code for a real long-lived user access token."""
+    
+    if body.state:
+        res = await db.execute(select(OAuthSession).where(OAuthSession.state == body.state))
+        session_row = res.scalar_one_or_none()
+        if not session_row:
+            raise HTTPException(status_code=400, detail="Invalid or expired OAuth state")
+        if session_row.organization_id != current_user.organization_id:
+            raise HTTPException(status_code=403, detail="State organization mismatch")
+        await db.delete(session_row)
+        await db.commit()
+
     try:
         short_lived = await meta_service.exchange_code_for_user_token(body.code)
         long_lived = await meta_service.exchange_for_long_lived_token(short_lived["access_token"])

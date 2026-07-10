@@ -1,9 +1,11 @@
 import hashlib
 import logging
-from qdrant_client.http.models import Distance, VectorParams
-from app.core.database import get_qdrant_client, verify_qdrant
-from app.core.config import settings
+
 import httpx
+from qdrant_client.http.models import Distance, VectorParams
+
+from app.core.config import settings
+from app.core.database import get_qdrant_client, verify_qdrant
 
 logger = logging.getLogger(__name__)
 

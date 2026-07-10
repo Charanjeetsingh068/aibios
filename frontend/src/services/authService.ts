@@ -41,6 +41,7 @@ export interface UserResponse {
   created_at: string;
   updated_at: string;
   last_login?: string;
+  permissions: string[];
 }
 
 export { getAccessToken, getRefreshToken, setTokens, clearTokens };

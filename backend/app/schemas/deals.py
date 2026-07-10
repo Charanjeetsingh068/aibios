@@ -1,4 +1,5 @@
 from typing import Optional
+
 from pydantic import BaseModel, Field
 
 VALID_STAGES = {"lead", "qualified", "meeting", "proposal", "negotiation", "won", "lost"}

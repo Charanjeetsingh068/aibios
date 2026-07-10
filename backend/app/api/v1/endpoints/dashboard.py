@@ -1,27 +1,41 @@
 import asyncio
 import logging
-import secrets
-import time
-import platform
 import os
-from datetime import datetime, date, time as dt_time, timedelta
+import platform
+import secrets
+from datetime import date, datetime, timedelta
+from datetime import time as dt_time
 from typing import Any, Dict, List, Optional
-from fastapi import APIRouter, Depends, HTTPException, status
+
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
-from sqlalchemy import select, func
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.core.config import settings
-from app.core.database import get_db, verify_postgres, verify_mongo, verify_redis, verify_qdrant
+from app.api.v1.endpoints.auth import RoleChecker, get_current_user
+from app.api.v1.endpoints.system import get_uptime
 from app.core import telemetry
+from app.core.config import settings
+from app.core.database import (
+    get_db,
+    verify_mongo,
+    verify_postgres,
+    verify_qdrant,
+    verify_redis,
+)
 from app.core.email import send_email
 from app.core.security import get_password_hash
-from app.api.v1.endpoints.auth import get_current_user, RoleChecker
-from app.api.v1.endpoints.system import get_uptime
-from app.models.auth import User, Organization, Role, Permission, PasswordResetToken
+from app.models.auth import Organization, PasswordResetToken, Permission, Role, User
 from app.models.business import (
-    Lead, Deal, Campaign, CallLog, Meeting, TaskItem, EmailQueueItem, TokenUsageEvent,
+    CallLog,
+    Campaign,
+    Deal,
+    EmailQueueItem,
+    Lead,
+    Meeting,
+    TaskItem,
+    TokenUsageEvent,
 )
 
 logger = logging.getLogger(__name__)

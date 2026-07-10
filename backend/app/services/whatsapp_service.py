@@ -5,11 +5,16 @@ from typing import Any, Dict, Optional, Tuple
 import httpx
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
+from tenacity import (
+    retry,
+    retry_if_exception_type,
+    stop_after_attempt,
+    wait_exponential,
+)
 
 from app.core.config import settings
-from app.core.crypto import decrypt_value, CryptoNotConfiguredError
-from app.models.enterprise_integrations import WhatsAppPhoneNumber, WhatsAppMessageLog
+from app.core.crypto import CryptoNotConfiguredError, decrypt_value
+from app.models.enterprise_integrations import WhatsAppMessageLog, WhatsAppPhoneNumber
 
 logger = logging.getLogger(__name__)
 

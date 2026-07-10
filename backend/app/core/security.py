@@ -2,11 +2,12 @@ import base64
 import hashlib
 import hmac
 from datetime import datetime, timedelta
-from typing import Any, Dict, List, Optional, Union
-from jose import jwt, JWTError
-from passlib.context import CryptContext
-from fastapi import HTTPException, status, Depends
+from typing import Any, Dict, Optional, Union
+
 from fastapi.security import OAuth2PasswordBearer
+from jose import jwt
+from passlib.context import CryptContext
+
 from app.core.config import settings
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")

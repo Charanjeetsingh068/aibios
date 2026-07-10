@@ -1,6 +1,8 @@
-from pydantic import BaseModel, EmailStr, Field
-from typing import List, Optional
 from datetime import datetime
+from typing import List, Optional
+
+from pydantic import BaseModel, EmailStr, Field
+
 
 class LoginRequest(BaseModel):
     email: EmailStr

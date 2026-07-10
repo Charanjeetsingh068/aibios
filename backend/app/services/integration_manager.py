@@ -5,11 +5,14 @@ from typing import Any, Dict, List, Optional
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.crypto import decrypt_value, CryptoNotConfiguredError
-from app.models.integrations import Integration
+from app.core.crypto import CryptoNotConfiguredError, decrypt_value
 from app.models.enterprise_integrations import (
-    IntegrationCredential, MetaPage, WhatsAppPhoneNumber, VoiceProviderCredential,
+    IntegrationCredential,
+    MetaPage,
+    VoiceProviderCredential,
+    WhatsAppPhoneNumber,
 )
+from app.models.integrations import Integration
 from app.services import meta_service
 from app.services.meta_service import MetaAPIError
 

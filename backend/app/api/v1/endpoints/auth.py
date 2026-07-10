@@ -3,9 +3,9 @@ import secrets
 import uuid
 from datetime import datetime, timedelta
 from typing import Any, Dict, Optional
-from fastapi import APIRouter, Depends, HTTPException, status, Request
-from fastapi.security import OAuth2PasswordBearer
-from jose import jwt, JWTError
+
+from fastapi import APIRouter, Depends, HTTPException, Request, status
+from jose import JWTError, jwt
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -13,28 +13,23 @@ from sqlalchemy.orm import selectinload
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.email import send_email
-from app.core.security import (
-    verify_password,
-    get_password_hash,
-    oauth2_scheme
-)
+from app.core.security import get_password_hash, oauth2_scheme, verify_password
 from app.models.auth import (
-    User,
-    Organization,
-    Session as UserSession,
-    RefreshToken,
-    LoginHistory,
     AuditLog,
-    PasswordResetToken
+    LoginHistory,
+    PasswordResetToken,
+    RefreshToken,
+    User,
 )
+from app.models.auth import Session as UserSession
 from app.schemas.auth import (
-    LoginRequest,
-    TokenResponse,
-    RefreshTokenRequest,
-    ForgotPasswordRequest,
-    ResetPasswordRequest,
     ChangePasswordRequest,
-    UserResponse
+    ForgotPasswordRequest,
+    LoginRequest,
+    RefreshTokenRequest,
+    ResetPasswordRequest,
+    TokenResponse,
+    UserResponse,
 )
 
 logger = logging.getLogger(__name__)

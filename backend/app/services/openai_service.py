@@ -1,7 +1,14 @@
 import logging
 from typing import AsyncGenerator, Dict, List
-from openai import AsyncOpenAI, APIConnectionError, APITimeoutError, RateLimitError
-from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
+
+from openai import APIConnectionError, APITimeoutError, AsyncOpenAI, RateLimitError
+from tenacity import (
+    retry,
+    retry_if_exception_type,
+    stop_after_attempt,
+    wait_exponential,
+)
+
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)

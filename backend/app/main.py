@@ -1,21 +1,65 @@
-import time
 import logging
-import socketio
+import time
 from contextlib import asynccontextmanager
+
+import socketio
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.middleware.httpsredirect import HTTPSRedirectMiddleware
-from app.core.config import settings
-from app.core.security import get_security_headers
+from fastapi.middleware.trustedhost import TrustedHostMiddleware
+
+from app.api.v1.endpoints import (
+    pipelines,
+    ai,
+    audit,
+    auth,
+    billing,
+    dashboard,
+    deals,
+    documents,
+    health,
+    integration_manager,
+    integrations,
+    kb,
+    leads,
+    meta_integration,
+    meta_sync,
+    meta_webhooks,
+    oauth,
+    organizations,
+    reports,
+    roles,
+    system,
+    twilio_integration,
+    users,
+    voice,
+    voice_providers,
+    whatsapp,
+    workflows,
+)
 from app.core import telemetry
+from app.core.config import settings
+from app.core.database import (
+    AsyncSessionLocal,
+    SqliteSessionLocal,
+    init_mongo_indexes,
+    is_postgres_offline,
+    postgres_engine,
+    seed_database,
+    sqlite_engine,
+)
 from app.core.realtime import sio
-from app.api.v1.endpoints import health, system, auth, dashboard, leads, deals, integrations, workflows, kb, documents, voice, reports, billing, oauth, whatsapp, twilio_integration, ai, meta_integration, voice_providers, integration_manager, organizations, users, roles, audit
-from app.core.database import is_postgres_offline, sqlite_engine, postgres_engine, seed_database, SqliteSessionLocal, AsyncSessionLocal, init_mongo_indexes
+from app.core.security import get_security_headers
+from app.models import (
+    business as _business_models,  # noqa: F401 ensures tables register on Base.metadata
+)
+from app.models import (
+    enterprise_integrations as _enterprise_integrations_models,  # noqa: F401 ensures tables register on Base.metadata
+)
+from app.models import (
+    integrations as _integrations_models,  # noqa: F401 ensures tables register on Base.metadata
+)
 from app.models.auth import Base
-from app.models import business as _business_models  # noqa: F401 ensures tables register on Base.metadata
-from app.models import integrations as _integrations_models  # noqa: F401 ensures tables register on Base.metadata
-from app.models import enterprise_integrations as _enterprise_integrations_models  # noqa: F401 ensures tables register on Base.metadata
 
 # Setup logger
 logging.basicConfig(
@@ -96,6 +140,7 @@ else:
     fastapi_app.add_middleware(TrustedHostMiddleware, allowed_hosts=["localhost", "127.0.0.1", "*.localhost"])
 
 from fastapi.responses import JSONResponse
+
 from app.core.redis_cache import RedisRateLimiter
 
 limiter = RedisRateLimiter()
@@ -137,9 +182,12 @@ fastapi_app.include_router(system.router, prefix=settings.API_V1_STR + "/system"
 fastapi_app.include_router(auth.router, prefix=settings.API_V1_STR + "/auth", tags=["Enterprise Authentication"])
 fastapi_app.include_router(dashboard.router, prefix=settings.API_V1_STR + "/dashboard", tags=["Enterprise Dashboard"])
 fastapi_app.include_router(leads.router, prefix=settings.API_V1_STR + "/leads", tags=["Leads"])
+fastapi_app.include_router(pipelines.router, prefix=settings.API_V1_STR + "/pipelines", tags=["Pipelines"])
 fastapi_app.include_router(deals.router, prefix=settings.API_V1_STR + "/deals", tags=["Deals / Pipeline"])
 fastapi_app.include_router(integrations.router, prefix=settings.API_V1_STR + "/integrations", tags=["Integrations"])
 fastapi_app.include_router(meta_integration.router, prefix=settings.API_V1_STR + "/integrations/meta", tags=["Meta Platform Integration"])
+fastapi_app.include_router(meta_webhooks.router, prefix=settings.API_V1_STR + "/integrations/meta/webhook", tags=["Meta Webhooks"])
+fastapi_app.include_router(meta_sync.router, prefix=settings.API_V1_STR + "/integrations/meta/sync", tags=["Meta Sync"])
 fastapi_app.include_router(integration_manager.router, prefix=settings.API_V1_STR + "/integrations/manager", tags=["Integration Manager"])
 fastapi_app.include_router(organizations.router, prefix=settings.API_V1_STR + "/organizations", tags=["Organizations (Super Admin)"])
 fastapi_app.include_router(users.router, prefix=settings.API_V1_STR + "/users", tags=["User Management"])

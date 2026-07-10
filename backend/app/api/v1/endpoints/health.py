@@ -1,10 +1,12 @@
+import asyncio
 import os
 from typing import Any, Dict
-import asyncio
+
 import psutil
 from fastapi import APIRouter
+
 from app.core.config import settings
-from app.core.database import verify_postgres, verify_mongo, verify_redis, verify_qdrant
+from app.core.database import verify_mongo, verify_postgres, verify_qdrant, verify_redis
 from app.core.env_check import get_integration_statuses
 
 router = APIRouter()
@@ -65,3 +67,23 @@ async def health_check():
         },
         "integrations": get_integration_statuses(),
     }
+
+@router.get("/meta")
+async def health_meta():
+    return {"status": "ok", "provider": "meta", "api_version": "v19.0"}
+
+@router.get("/facebook")
+async def health_facebook():
+    return {"status": "ok", "provider": "facebook", "api_version": "v19.0"}
+
+@router.get("/instagram")
+async def health_instagram():
+    return {"status": "ok", "provider": "instagram", "api_version": "v19.0"}
+
+@router.get("/whatsapp")
+async def health_whatsapp():
+    return {"status": "ok", "provider": "whatsapp", "api_version": "v19.0"}
+
+@router.get("/voice")
+async def health_voice():
+    return {"status": "ok", "provider": "voice"}

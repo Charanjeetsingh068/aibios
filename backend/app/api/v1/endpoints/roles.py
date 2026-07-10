@@ -7,10 +7,10 @@ from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.database import get_db
+from app.api.v1.endpoints.auth import PermissionChecker
 from app.core.audit import record_audit_log
-from app.api.v1.endpoints.auth import get_current_user, PermissionChecker
-from app.models.auth import User, Role, Permission
+from app.core.database import get_db
+from app.models.auth import Permission, Role, User
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -163,7 +163,10 @@ async def delete_role(
     role = await db.get(Role, role_id)
     if not role:
         raise HTTPException(status_code=404, detail="Role not found")
-    if role.users:
+    
+    # Manually check for assigned users to avoid lazy-loading issues
+    assigned_users_count = (await db.execute(select(User.id).where(User.role_id == role_id).limit(1))).scalar_one_or_none()
+    if assigned_users_count is not None:
         raise HTTPException(status_code=409, detail="Cannot delete a role that is still assigned to users")
 
     await db.delete(role)

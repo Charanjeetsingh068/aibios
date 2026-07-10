@@ -3,23 +3,24 @@ import json
 import logging
 from datetime import datetime
 from typing import Any, Dict, Optional, Tuple
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
+
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi.responses import Response as RawResponse
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.v1.endpoints.auth import PermissionChecker, get_current_user
 from app.core.config import settings
+from app.core.crypto import CryptoNotConfiguredError, encrypt_value
 from app.core.database import get_db
 from app.core.security import verify_meta_signature
-from app.core.crypto import encrypt_value, CryptoNotConfiguredError
-from app.api.v1.endpoints.auth import get_current_user, PermissionChecker
 from app.models.auth import User
 from app.models.business import Lead
-from app.models.enterprise_integrations import WhatsAppPhoneNumber, WhatsAppMessageLog
+from app.models.enterprise_integrations import WhatsAppMessageLog, WhatsAppPhoneNumber
 from app.services import whatsapp_service
-from app.services.whatsapp_service import WhatsAppNotConfiguredError, WhatsAppAPIError
 from app.services.event_bus import dispatch_event
+from app.services.whatsapp_service import WhatsAppAPIError, WhatsAppNotConfiguredError
 
 logger = logging.getLogger(__name__)
 router = APIRouter()

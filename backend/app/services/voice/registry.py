@@ -4,14 +4,18 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
-from app.core.crypto import decrypt_value, CryptoNotConfiguredError
+from app.core.crypto import CryptoNotConfiguredError, decrypt_value
 from app.models.enterprise_integrations import VoiceProviderCredential
-from app.services.voice.base import VoiceProvider, VoiceInfo, VoiceProviderNotConfiguredError
-from app.services.voice.openai_voice import OpenAIVoiceProvider
-from app.services.voice.elevenlabs_voice import ElevenLabsVoiceProvider
-from app.services.voice.cartesia_voice import CartesiaVoiceProvider
 from app.services.voice.azure_voice import AzureVoiceProvider
+from app.services.voice.base import (
+    VoiceInfo,
+    VoiceProvider,
+    VoiceProviderNotConfiguredError,
+)
+from app.services.voice.cartesia_voice import CartesiaVoiceProvider
+from app.services.voice.elevenlabs_voice import ElevenLabsVoiceProvider
 from app.services.voice.google_voice import GoogleVoiceProvider
+from app.services.voice.openai_voice import OpenAIVoiceProvider
 
 PROVIDERS: Dict[str, VoiceProvider] = {
     "openai_realtime": OpenAIVoiceProvider(),

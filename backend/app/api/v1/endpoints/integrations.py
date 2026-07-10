@@ -3,22 +3,23 @@ import logging
 import secrets
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
-from fastapi import APIRouter, Depends, HTTPException, Request, Response, Query
+
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.v1.endpoints.auth import get_current_user
 from app.core.config import settings
+from app.core.crypto import CryptoNotConfiguredError, decrypt_value
 from app.core.database import get_db
 from app.core.security import verify_meta_signature
-from app.core.crypto import decrypt_value, CryptoNotConfiguredError
-from app.api.v1.endpoints.auth import get_current_user
 from app.models.auth import User
 from app.models.business import Lead
-from app.models.integrations import Integration
 from app.models.enterprise_integrations import MetaPage
+from app.models.integrations import Integration
 from app.services import meta_service
-from app.services.meta_service import MetaAPIError
 from app.services.event_bus import dispatch_event
+from app.services.meta_service import MetaAPIError
 
 logger = logging.getLogger(__name__)
 router = APIRouter()

@@ -1,23 +1,37 @@
-import os
 import logging
+import os
 from datetime import datetime
 from typing import Any, Dict, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File as FastAPIFile
+from fastapi import APIRouter, Depends, HTTPException, UploadFile
+from fastapi import File as FastAPIFile
 from fastapi.responses import Response as RawResponse
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.v1.endpoints.auth import PermissionChecker
+from app.core.crypto import CryptoNotConfiguredError, encrypt_value
 from app.core.database import get_db
-from app.core.crypto import encrypt_value, CryptoNotConfiguredError
-from app.api.v1.endpoints.auth import get_current_user, PermissionChecker
 from app.models.auth import User
 from app.models.business import Campaign
-from app.models.enterprise_integrations import VoiceProviderCredential, VoiceLibraryEntry, CampaignVoiceAssignment
-from app.services.voice.registry import PROVIDERS, is_provider_configured, list_voices_for_org, synthesize_for_org, resolve_credential
-from app.services.voice.base import VoiceProviderNotConfiguredError, VoiceProviderAPIError
+from app.models.enterprise_integrations import (
+    CampaignVoiceAssignment,
+    VoiceLibraryEntry,
+    VoiceProviderCredential,
+)
+from app.services.voice.base import (
+    VoiceProviderAPIError,
+    VoiceProviderNotConfiguredError,
+)
 from app.services.voice.openai_voice import create_realtime_session
+from app.services.voice.registry import (
+    PROVIDERS,
+    is_provider_configured,
+    list_voices_for_org,
+    resolve_credential,
+    synthesize_for_org,
+)
 
 logger = logging.getLogger(__name__)
 router = APIRouter()

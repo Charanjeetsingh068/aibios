@@ -1,15 +1,16 @@
 import logging
 from typing import Any, Dict
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.v1.endpoints.auth import get_current_user
 from app.core.database import get_db
 from app.core.realtime import emit_to_organization
-from app.api.v1.endpoints.auth import get_current_user
 from app.models.auth import User
 from app.models.business import Deal
-from app.schemas.deals import DealCreate, DealUpdate, VALID_STAGES
+from app.schemas.deals import VALID_STAGES, DealCreate, DealUpdate
 
 logger = logging.getLogger(__name__)
 router = APIRouter()

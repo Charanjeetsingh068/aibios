@@ -1,6 +1,7 @@
 from datetime import datetime
 from typing import Optional
-from sqlalchemy import String, Boolean, DateTime, ForeignKey, Integer, Text
+
+from sqlalchemy import Boolean, DateTime, ForeignKey, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.auth import Base, generate_uuid
@@ -155,3 +156,80 @@ class CampaignVoiceAssignment(Base):
     assigned_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
+
+
+class WebhookLog(Base):
+    """Log of incoming Meta Webhooks."""
+    __tablename__ = "meta_webhook_logs"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
+    provider: Mapped[str] = mapped_column(String(30), default="meta")
+    event_type: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    payload: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    signature: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    status: Mapped[str] = mapped_column(String(30), default="pending")  # pending, processed, error, ignored
+    error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    received_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    processed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+
+class LeadSyncHistory(Base):
+    """History of leads synced from Meta Lead Ads to CRM."""
+    __tablename__ = "meta_lead_sync_history"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
+    organization_id: Mapped[str] = mapped_column(String(36), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
+    meta_page_id: Mapped[Optional[str]] = mapped_column(String(36), ForeignKey("meta_pages.id", ondelete="SET NULL"), nullable=True)
+    meta_lead_id: Mapped[str] = mapped_column(String(60), nullable=False, index=True)
+    form_id: Mapped[Optional[str]] = mapped_column(String(60), nullable=True)
+    crm_lead_id: Mapped[Optional[str]] = mapped_column(String(36), ForeignKey("leads.id", ondelete="SET NULL"), nullable=True)
+    status: Mapped[str] = mapped_column(String(30), default="synced")  # synced, error, duplicate
+    error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    raw_data: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    synced_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class LeadMapping(Base):
+    """Organization-specific mapping of Meta Lead Form fields to CRM fields."""
+    __tablename__ = "meta_lead_mappings"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
+    organization_id: Mapped[str] = mapped_column(String(36), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
+    meta_page_id: Mapped[Optional[str]] = mapped_column(String(36), ForeignKey("meta_pages.id", ondelete="CASCADE"), nullable=True)
+    form_id: Mapped[Optional[str]] = mapped_column(String(60), nullable=True)  # Null means default for org
+    meta_field: Mapped[str] = mapped_column(String(100), nullable=False)
+    crm_field: Mapped[str] = mapped_column(String(100), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class TokenHistory(Base):
+    """Log of integration token refresh operations and status changes."""
+    __tablename__ = "meta_token_history"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
+    credential_id: Mapped[str] = mapped_column(String(36), ForeignKey("integration_credentials.id", ondelete="CASCADE"), nullable=False)
+    action: Mapped[str] = mapped_column(String(50), nullable=False)  # refreshed, disconnected, expired, error
+    detail: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class OAuthSession(Base):
+    __tablename__ = "oauth_sessions"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
+    organization_id: Mapped[str] = mapped_column(String(36), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
+    user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    state: Mapped[str] = mapped_column(String(100), nullable=False, unique=True, index=True)
+    provider: Mapped[str] = mapped_column(String(30), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+class BackgroundJob(Base):
+    __tablename__ = "background_jobs"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
+    job_type: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
+    payload: Mapped[str] = mapped_column(Text, nullable=True)
+    status: Mapped[str] = mapped_column(String(20), default="pending") # pending, processing, completed, failed
+    next_run_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    error_log: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

@@ -1,12 +1,14 @@
-import logging
 import asyncio
+import logging
 import time
 import uuid
-from typing import AsyncGenerator, Optional, List, Dict, Any
-from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
-from motor.motor_asyncio import AsyncIOMotorClient
+from typing import Any, AsyncGenerator, Dict, List, Optional
+
 import redis.asyncio as aioredis
+from motor.motor_asyncio import AsyncIOMotorClient
 from qdrant_client import QdrantClient
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
@@ -31,6 +33,7 @@ AsyncSessionLocal = async_sessionmaker(
 # 1b. SQLite Fallback Setup (Local-First development safety)
 # ------------------------------------------------------------------------------
 import os
+
 fallback_db_path = "d:/react-website/aibios/database/postgres/fallback.db"
 os.makedirs(os.path.dirname(fallback_db_path), exist_ok=True)
 
@@ -67,6 +70,11 @@ async def is_postgres_offline() -> bool:
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
     """Dependency generator for database sessions in FastAPI routes."""
     use_sqlite = await is_postgres_offline()
+    if use_sqlite:
+        from app.models.auth import Base
+        async with sqlite_engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+    
     session_factory = SqliteSessionLocal if use_sqlite else AsyncSessionLocal
     
     async with session_factory() as session:
@@ -306,9 +314,10 @@ async def seed_database(session):
     Seeds the relational database with default Roles, Permissions, a Demo Org,
     and a Super Admin account. Self-healing/idempotent.
     """
-    from app.models.auth import Permission, Role, Organization, User
-    from app.core.security import get_password_hash
     from sqlalchemy import select
+
+    from app.core.security import get_password_hash
+    from app.models.auth import Organization, Permission, Role, User
     
     # 1. Seed Permissions — dot notation "module.action" per spec (e.g. "leads.read"),
     # so the permission catalog can be listed/assigned generically by the role-management
@@ -375,11 +384,28 @@ async def seed_database(session):
         # Knowledge base
         {"id": "knowledge.read", "name": "Read Knowledge Base", "description": "Search/view knowledge base documents"},
         {"id": "knowledge.manage", "name": "Manage Knowledge Base", "description": "Upload/edit/delete knowledge base documents"},
+        # Documents
+        {"id": "documents.read", "name": "Read Documents", "description": "List/download/preview uploaded documents"},
+        {"id": "documents.write", "name": "Write Documents", "description": "Upload/delete documents"},
         # AI Agents
         {"id": "agents.read", "name": "Read Agents", "description": "Read LangGraph agent statuses and nodes"},
         {"id": "agents.write", "name": "Write Agents", "description": "Configure agent flows and tools"},
         # System
         {"id": "system.health", "name": "View System Health", "description": "View system/database health status"},
+        {"id": "system.admin", "name": "Administer System", "description": "Manage platform-level system configuration"},
+        # Dashboard (enterprise overview widgets: tasks, campaigns, meetings)
+        {"id": "dashboard.read", "name": "Read Dashboard", "description": "View dashboard metrics, tasks, campaigns, and meetings"},
+        {"id": "dashboard.write", "name": "Write Dashboard", "description": "Create/edit dashboard tasks, campaigns, and meetings"},
+        {"id": "dashboard.delete", "name": "Delete Dashboard Items", "description": "Delete dashboard tasks, campaigns, and meetings"},
+        # Facebook (admin tier — beyond basic connect/configure)
+        {"id": "facebook.admin", "name": "Administer Facebook", "description": "Manage Facebook Page webhook subscriptions and advanced settings"},
+        # Automation Engine (execution tier — distinct from authoring)
+        {"id": "automation.execute", "name": "Execute Automation", "description": "Manually trigger/run a workflow"},
+        # Organizations (tenant self-service — distinct from platform-wide organizations.* CRUD)
+        {"id": "organizations.self_manage", "name": "Manage Own Organization", "description": "Edit the caller's own organization profile/settings"},
+        # Users — team-scoped tier for Manager role (own direct reports only, not the whole org)
+        {"id": "users.read_team", "name": "Read Team Users", "description": "List/view users who report to the caller"},
+        {"id": "users.write_team", "name": "Write Team Users", "description": "Create/edit/suspend users who report to the caller"},
     ]
 
     for p in permissions_data:
@@ -395,24 +421,30 @@ async def seed_database(session):
             "users.read", "users.write", "users.delete", "users.suspend", "users.invite",
             "users.reset_password", "users.assign_role", "roles.read", "audit.read",
             "integrations.read", "integrations.write",
-            "facebook.read", "facebook.write", "instagram.read", "instagram.write",
+            "facebook.read", "facebook.write", "facebook.admin", "instagram.read", "instagram.write",
             "whatsapp.read", "whatsapp.write", "whatsapp.admin",
             "voice.read", "voice.write", "voice.admin", "voice.call", "voice.train",
-            "automation.read", "automation.write", "automation.admin",
+            "automation.read", "automation.write", "automation.admin", "automation.execute",
             "crm.read", "crm.write", "crm.delete", "crm.export",
             "campaign.read", "campaign.write", "campaign.execute",
             "reports.read", "reports.export", "billing.read",
-            "knowledge.read", "knowledge.manage", "agents.read", "agents.write",
+            "knowledge.read", "knowledge.manage", "documents.read", "documents.write",
+            "agents.read", "agents.write", "system.health",
+            "dashboard.read", "dashboard.write", "dashboard.delete", "organizations.self_manage",
         ]},
-        {"id": "manager", "name": "Manager", "description": "Team lead manager", "permissions": [
+        {"id": "manager", "name": "Manager", "description": "Team lead manager — manages own direct reports only, not the whole organization", "permissions": [
             "crm.read", "crm.write", "agents.read", "integrations.read", "voice.read",
-            "campaign.read", "reports.read",
+            "campaign.read", "reports.read", "dashboard.read", "documents.read",
+            "users.read_team", "users.write_team",
         ]},
-        {"id": "sales_executive", "name": "Sales Executive", "description": "CRM executive worker", "permissions": ["crm.read", "crm.write", "campaign.read"]},
-        {"id": "ai_agent", "name": "AI Agent", "description": "Autonomous worker agent", "permissions": ["crm.read", "crm.write", "agents.read", "automation.write"]},
-        {"id": "developer", "name": "Developer", "description": "Developer node configurer", "permissions": ["agents.read", "agents.write", "automation.read", "automation.write", "automation.admin"]},
-        {"id": "auditor", "name": "Auditor", "description": "Security logs auditor", "permissions": ["crm.read", "agents.read", "integrations.read", "audit.read", "reports.read"]},
-        {"id": "viewer", "name": "Viewer", "description": "Read-only access", "permissions": ["crm.read"]}
+        {"id": "sales_executive", "name": "Sales Executive", "description": "CRM executive worker", "permissions": ["crm.read", "crm.write", "campaign.read", "dashboard.read", "documents.read"]},
+        {"id": "ai_agent", "name": "AI Agent", "description": "Autonomous worker agent", "permissions": ["crm.read", "crm.write", "agents.read", "automation.write", "automation.execute"]},
+        {"id": "developer", "name": "Developer", "description": "Developer node configurer", "permissions": ["agents.read", "agents.write", "automation.read", "automation.write", "automation.admin", "automation.execute", "system.health"]},
+        {"id": "auditor", "name": "Auditor", "description": "Security logs auditor — broad read-only access for compliance review", "permissions": [
+            "crm.read", "agents.read", "integrations.read", "audit.read", "reports.read",
+            "users.read", "roles.read", "dashboard.read", "documents.read",
+        ]},
+        {"id": "viewer", "name": "Viewer", "description": "Read-only access", "permissions": ["crm.read", "dashboard.read"]}
     ]
 
     for r in roles_data:
@@ -501,6 +533,7 @@ async def seed_database(session):
 
 
 from contextlib import asynccontextmanager
+
 
 @asynccontextmanager
 async def mongo_transaction():

@@ -1,5 +1,6 @@
 import logging
 from typing import Optional
+
 from app.core.database import redis_client
 
 logger = logging.getLogger(__name__)

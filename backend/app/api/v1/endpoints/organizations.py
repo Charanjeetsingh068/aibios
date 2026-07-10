@@ -4,14 +4,14 @@ from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel
-from sqlalchemy import select, func, or_
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.database import get_db
+from app.api.v1.endpoints.auth import PermissionChecker
 from app.core.audit import record_audit_log
-from app.core.pagination import PageParams, pagination_params, apply_sort
-from app.api.v1.endpoints.auth import get_current_user, PermissionChecker
-from app.models.auth import User, Organization
+from app.core.database import get_db
+from app.core.pagination import PageParams, apply_sort, pagination_params
+from app.models.auth import Organization, User
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
