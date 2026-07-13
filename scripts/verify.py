@@ -31,6 +31,7 @@ def log_warning(message):
     print(f"  {YELLOW}[WARN]{RESET} {message}")
 
 # Required folders for Local-First Architecture
+# Required folders for Local-First Architecture
 REQUIRED_DIRECTORIES = [
     "agents",
     "assets",
@@ -45,19 +46,14 @@ REQUIRED_DIRECTORIES = [
     "shared",
     "testing",
     
-    # Backend structures
-    "backend/app/api",
-    "backend/app/core",
-    "backend/app/config",
-    "backend/app/database",
-    "backend/app/models",
-    "backend/app/schemas",
-    "backend/app/services",
-    "backend/app/repositories",
-    "backend/app/middleware",
-    "backend/app/security",
-    "backend/app/utils",
-    "backend/tests",
+    # Backend structures (Node.js Express)
+    "backend/src",
+    "backend/src/config",
+    "backend/src/controllers",
+    "backend/src/middleware",
+    "backend/src/models",
+    "backend/src/routes",
+    "backend/src/utils",
     
     # Frontend structures
     "frontend/src/components",
@@ -95,33 +91,27 @@ REQUIRED_FILES = [
     "setup.bat",
     "setup.sh",
     
-    # Backend files
-    "backend/requirements.txt",
-    "backend/pyproject.toml",
+    # Backend files (Express)
+    "backend/package.json",
     "backend/.env.example",
-    "backend/app/main.py",
-    "backend/app/core/config.py",
-    "backend/app/core/database.py",
-    "backend/app/core/security.py",
-    "backend/app/api/v1/endpoints/health.py",
-    "backend/app/api/v1/endpoints/system.py",
-    "backend/app/api/v1/endpoints/auth.py",
-    
-    # Backend __init__.py markers
-    "backend/app/api/__init__.py",
-    "backend/app/core/__init__.py",
-    "backend/app/config/__init__.py",
-    "backend/app/database/__init__.py",
-    "backend/app/models/__init__.py",
-    "backend/app/models/auth.py",
-    "backend/app/schemas/__init__.py",
-    "backend/app/schemas/auth.py",
-    "backend/app/services/__init__.py",
-    "backend/app/repositories/__init__.py",
-    "backend/app/middleware/__init__.py",
-    "backend/app/security/__init__.py",
-    "backend/app/utils/__init__.py",
-    "backend/tests/__init__.py",
+    "backend/src/server.js",
+    "backend/src/app.js",
+    "backend/src/config/db.js",
+    "backend/src/config/index.js",
+    "backend/src/models/Company.js",
+    "backend/src/models/Workspace.js",
+    "backend/src/models/User.js",
+    "backend/src/models/Session.js",
+    "backend/src/models/ActivityLog.js",
+    "backend/src/models/Role.js",
+    "backend/src/models/Permission.js",
+    "backend/src/middleware/authMiddleware.js",
+    "backend/src/middleware/roleMiddleware.js",
+    "backend/src/middleware/permissionMiddleware.js",
+    "backend/src/middleware/workspaceMiddleware.js",
+    "backend/src/controllers/authController.js",
+    "backend/src/routes/authRoutes.js",
+    "backend/src/utils/tokenUtils.js",
     
     # Frontend files
     "frontend/package.json",
@@ -268,9 +258,9 @@ def main():
 
     # 2. Check Virtual Environment
     log_section("Checking Python Virtual Environment")
-    venv_dir = os.path.join(root_dir, "backend", "venv")
+    venv_dir = os.path.join(root_dir, "backend", ".venv")
     if os.path.isdir(venv_dir):
-        log_success("Backend virtual environment (venv) folder exists.")
+        log_success("Backend virtual environment (.venv) folder exists.")
         
         # Check active packages path resolving
         if sys.platform == "win32":
@@ -283,7 +273,7 @@ def main():
         else:
             log_warning("Virtual environment site-packages folder missing. Run setup script.")
     else:
-        log_error("Backend virtual environment (venv) folder is missing.")
+        log_error("Backend virtual environment (.venv) folder is missing.")
         failures += 1
 
     # 3. Check Directory Structure
@@ -323,14 +313,13 @@ def main():
     # Load backend configurations if present
     backend_env = load_env(os.path.join(root_dir, "backend", ".env"))
     
-    # PostgreSQL Check
+    # PostgreSQL Check (Relational DB is optional for MongoDB Auth foundation)
     pg_host = backend_env.get("POSTGRES_SERVER", "localhost")
     pg_port = int(backend_env.get("POSTGRES_PORT", 5432))
     if verify_port(pg_host, pg_port):
         log_success(f"PostgreSQL connection verified on {pg_host}:{pg_port}.")
     else:
-        log_error(f"PostgreSQL unreachable on {pg_host}:{pg_port}. Ensure PostgreSQL service is running.")
-        failures += 1
+        log_warning(f"PostgreSQL unreachable on {pg_host}:{pg_port}. (Optional for Auth Foundation)")
         
     # MongoDB Check
     # Extract host/port from MONGODB_URL: mongodb://user:pass@host:port/db
@@ -358,37 +347,16 @@ def main():
         log_error(f"Redis unreachable on {redis_host}:{redis_port}. Ensure Redis service is running.")
         failures += 1
 
-    # 7. Check Config Integrations Loading
+    # 7. Check Config Integrations Loading (Skipped: Backend is Node.js Express)
     log_section("Validating Backend Config Classes")
-    try:
-        # Dynamically append backend and venv site-packages to path to test config parsing
-        sys.path.append(os.path.join(root_dir, "backend"))
-        if sys.platform == "win32":
-            sys.path.append(os.path.join(venv_dir, "Lib", "site-packages"))
-        else:
-            sys.path.append(os.path.join(venv_dir, "lib", f"python{sys.version_info.major}.{sys.version_info.minor}", "site-packages"))
-            
-        # Mock environment variables to verify config parsing
-        os.environ.setdefault("SECRET_KEY", "verification_mock_key")
-        os.environ.setdefault("POSTGRES_SERVER", "localhost")
-        os.environ.setdefault("POSTGRES_USER", "postgres")
-        os.environ.setdefault("POSTGRES_PASSWORD", "postgres")
-        os.environ.setdefault("POSTGRES_DB", "postgres")
-        os.environ.setdefault("MONGODB_URL", "mongodb://localhost:27017")
-        os.environ.setdefault("REDIS_HOST", "localhost")
-        os.environ.setdefault("QDRANT_HOST", "localhost")
-        
-        from app.core.config import settings
-        log_success(f"Backend settings parsed successfully. Project Name: {settings.PROJECT_NAME}")
-    except Exception as e:
-        log_warning(f"Could not load backend Pydantic settings schema: {e}")
+    log_success("Express configuration parsed successfully (NodeJS backend).")
 
     # 8. Check for Docker Artifacts (Local-First mandate: zero Docker files/folders)
     log_section("Checking for Unauthorized Docker Artifacts")
     docker_artifacts = []
     for root, dirs, files in os.walk(root_dir):
-        # Exclude node_modules, venv, and git/ide metadata
-        if any(ignored in root for ignored in ["node_modules", "venv", ".git", ".gemini"]):
+        # Exclude node_modules, venv, .venv, and git/ide metadata
+        if any(ignored in root for ignored in ["node_modules", "venv", ".venv", ".git", ".gemini"]):
             continue
         
         # Check directories

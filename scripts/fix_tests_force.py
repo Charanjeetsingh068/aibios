@@ -1,7 +1,7 @@
 import os
 import re
 
-test_file = "d:/react-website/aibios/backend/tests/test_crm_endpoints.py"
+test_file = "c:/react/aibios/backend/tests/test_crm_endpoints.py"
 
 with open(test_file, "r", encoding="utf-8") as f:
     content = f.read()

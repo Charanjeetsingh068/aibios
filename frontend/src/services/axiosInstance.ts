@@ -15,6 +15,12 @@ axiosInstance.interceptors.request.use(
     if (token && config.headers) {
       config.headers['Authorization'] = `Bearer ${token}`;
     }
+    if (typeof window !== 'undefined') {
+      const workspaceId = localStorage.getItem('aibos_current_workspace_id');
+      if (workspaceId && config.headers) {
+        config.headers['x-workspace-id'] = workspaceId;
+      }
+    }
     return config;
   },
   (error) => {

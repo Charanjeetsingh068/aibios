@@ -1,7 +1,7 @@
 import os
 import re
 
-BACKEND_DIR = "d:/react-website/aibios/backend/app"
+BACKEND_DIR = "c:/react/aibios/backend/app"
 meta_int_path = os.path.join(BACKEND_DIR, "api", "v1", "endpoints", "meta_integration.py")
 
 with open(meta_int_path, "r", encoding="utf-8") as f:

@@ -93,7 +93,7 @@ class Settings(BaseSettings):
     WHATSAPP_PHONE_NUMBER_ID: Optional[str] = None
     WHATSAPP_BUSINESS_ACCOUNT_ID: Optional[str] = None
     WHATSAPP_ACCESS_TOKEN: Optional[str] = None
-    WHATSAPP_WEBHOOK_VERIFY_TOKEN: Optional[str] = None
+    WHATSAPP_WEBHOOK_VERIFY_TOKEN: Optional[str] = "whatsapp_verify_token_default_2026"
 
     # Google Sheets API
     GOOGLE_SERVICE_ACCOUNT_JSON: Optional[str] = None

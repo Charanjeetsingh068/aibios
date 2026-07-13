@@ -57,6 +57,12 @@ postgres_data/
 mongodb_data/
 redis_data/
 qdrant_data/
+database/postgres_bin/
+database/redis_bin/
+database/*.zip
+appendonly.aof
+database/pg_pw.txt
+backend/app/uploads/
 
 # Environments (Secrets)
 .env

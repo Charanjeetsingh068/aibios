@@ -8,7 +8,7 @@ files = [
 ]
 
 for fpath in files:
-    full_path = os.path.join("d:/react-website/aibios", fpath)
+    full_path = os.path.join("c:/react/aibios", fpath)
     with open(full_path, "r", encoding="utf-8") as f:
         content = f.read()
     

@@ -110,7 +110,7 @@ foreach ($item in $envFiles) {
 Write-Header "Setting Up Python Virtual Environment (Backend)"
 
 $backendDir = Resolve-Path "./backend"
-$venvPath = Join-Path $backendDir "venv"
+$venvPath = Join-Path $backendDir ".venv"
 
 if (-not (Test-Path $venvPath)) {
     Write-Host "Creating Virtual Environment at $venvPath..." -ForegroundColor Yellow

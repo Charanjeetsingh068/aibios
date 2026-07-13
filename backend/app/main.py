@@ -30,6 +30,7 @@ from app.api.v1.endpoints import (
     reports,
     roles,
     system,
+    teams,
     twilio_integration,
     users,
     voice,
@@ -191,6 +192,7 @@ fastapi_app.include_router(meta_sync.router, prefix=settings.API_V1_STR + "/inte
 fastapi_app.include_router(integration_manager.router, prefix=settings.API_V1_STR + "/integrations/manager", tags=["Integration Manager"])
 fastapi_app.include_router(organizations.router, prefix=settings.API_V1_STR + "/organizations", tags=["Organizations (Super Admin)"])
 fastapi_app.include_router(users.router, prefix=settings.API_V1_STR + "/users", tags=["User Management"])
+fastapi_app.include_router(teams.router, prefix=settings.API_V1_STR + "/teams", tags=["Team Management"])
 fastapi_app.include_router(roles.router, prefix=settings.API_V1_STR + "/roles", tags=["Role Management"])
 fastapi_app.include_router(audit.router, prefix=settings.API_V1_STR + "/audit", tags=["Audit Log"])
 fastapi_app.include_router(workflows.router, prefix=settings.API_V1_STR + "/workflows", tags=["Workflows / Automations"])

@@ -1,7 +1,7 @@
 import os
 import re
 
-BACKEND_DIR = "d:/react-website/aibios/backend/app"
+BACKEND_DIR = "c:/react/aibios/backend/app"
 
 # 1. Update Models
 models_path = os.path.join(BACKEND_DIR, "models", "enterprise_integrations.py")

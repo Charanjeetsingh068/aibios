@@ -1,9 +1,13 @@
 import sys
 import asyncio
+import os
 from dotenv import load_dotenv
-load_dotenv("d:/react-website/aibios/backend/.env")
 
-sys.path.append('d:/react-website/aibios/backend')
+current_dir = os.path.dirname(os.path.abspath(__file__))
+backend_dir = os.path.abspath(os.path.join(current_dir, "../backend"))
+load_dotenv(os.path.join(backend_dir, ".env"))
+
+sys.path.append(backend_dir)
 
 from app.core.database import AsyncSessionLocal
 from sqlalchemy import text

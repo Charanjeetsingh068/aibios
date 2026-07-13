@@ -1,6 +1,6 @@
 import os
 
-filepath = "d:/react-website/aibios/frontend/src/services/integrationsService.ts"
+filepath = "c:/react/aibios/frontend/src/services/integrationsService.ts"
 with open(filepath, "r", encoding="utf-8") as f:
     content = f.read()
 

@@ -109,7 +109,7 @@ done
 # ------------------------------------------------------------------------------
 log_header "Setting Up Python Virtual Environment (Backend)"
 
-VENV_DIR="./backend/venv"
+VENV_DIR="./backend/.venv"
 if [ ! -d "$VENV_DIR" ]; then
     echo -e "Creating Virtual Environment at $VENV_DIR..."
     $PYTHON_CMD -m venv "$VENV_DIR"

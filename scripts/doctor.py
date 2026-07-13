@@ -131,7 +131,7 @@ def main():
     
     root_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
     backend_env = os.path.join(root_dir, "backend", ".env")
-    backend_venv = os.path.join(root_dir, "backend", "venv")
+    backend_venv = os.path.join(root_dir, "backend", ".venv")
     
     if os.path.isfile(backend_env):
         log_pass("backend/.env configuration file exists")
@@ -140,9 +140,9 @@ def main():
         doctor_issues += 1
         
     if os.path.isdir(backend_venv):
-        log_pass("backend/venv virtual environment exists")
+        log_pass("backend/.venv virtual environment exists")
     else:
-        log_fail("backend/venv virtual environment is missing", "Run 'npm run setup' to compile dependencies and create the virtual environment")
+        log_fail("backend/.venv virtual environment is missing", "Run 'npm run setup' to compile dependencies and create the virtual environment")
         doctor_issues += 1
 
     # Conclusion

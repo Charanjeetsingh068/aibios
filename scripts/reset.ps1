@@ -9,7 +9,7 @@ Write-Host "==========================================================" -Foregro
 Write-Host "`n[1/2] Cleaning package and environment folders..." -ForegroundColor Yellow
 
 $cleanTargets = @(
-    "backend/venv",
+    "backend/.venv",
     "node_modules",
     "frontend/node_modules",
     "frontend/.next",

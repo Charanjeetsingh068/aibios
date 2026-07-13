@@ -16,7 +16,7 @@ echo -e "${RED}==========================================================${RESET
 
 # 1. Delete Dependencies & Builds
 echo -e "\n${YELLOW}[1/2] Cleaning package and environment folders...${RESET}"
-rm -rf ./backend/venv
+rm -rf ./backend/.venv
 rm -rf ./node_modules
 rm -rf ./frontend/node_modules
 rm -rf ./frontend/.next

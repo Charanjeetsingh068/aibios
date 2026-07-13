@@ -4,6 +4,8 @@ import { useState, useEffect, useRef } from 'react';
 import Script from 'next/script';
 import { Key, Mail } from 'lucide-react';
 import { login, loginWithGoogleCode } from '../../../services/authService';
+import { useRouter } from 'next/navigation';
+import { useAuth } from '../../../contexts/AuthContext';
 import '../../../styles/dashboard.css';
 
 const GOOGLE_CLIENT_ID = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID || '';
@@ -15,6 +17,8 @@ declare global {
 }
 
 export default function LoginPage() {
+  const { isAuthenticated, isLoading: authLoading } = useAuth();
+  const router = useRouter();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [rememberMe, setRememberMe] = useState(false);
@@ -24,11 +28,12 @@ export default function LoginPage() {
   const [googleLoading, setGoogleLoading] = useState(false);
   const googleCodeClientRef = useRef<any>(null);
 
-  // Clear any existing session tokens upon loading the login page
+  // Auto redirect if already authenticated
   useEffect(() => {
-    localStorage.removeItem('aibos_access_token');
-    localStorage.removeItem('aibos_refresh_token');
-  }, []);
+    if (!authLoading && isAuthenticated) {
+      router.replace('/');
+    }
+  }, [isAuthenticated, authLoading, router]);
 
   const initGoogleCodeClient = () => {
     if (!GOOGLE_CLIENT_ID || !window.google?.accounts?.oauth2) return;

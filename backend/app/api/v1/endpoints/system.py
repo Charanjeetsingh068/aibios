@@ -171,7 +171,7 @@ async def _mongo_version() -> str:
         info = await asyncio.wait_for(mongo_client.admin.command("buildInfo"), timeout=2.0)
         return str(info.get("version", "unknown"))
     except Exception as e:
-        logger.error(f"Failed to read MongoDB version: {e}")
+        logger.warning(f"Failed to read MongoDB version: {e}")
         return "unknown"
 
 
@@ -180,7 +180,7 @@ async def _redis_version() -> str:
         info = await asyncio.wait_for(redis_client.info(), timeout=2.0)
         return str(info.get("redis_version", "unknown"))
     except Exception as e:
-        logger.error(f"Failed to read Redis version: {e}")
+        logger.warning(f"Failed to read Redis version: {e}")
         return "unknown"
 
 

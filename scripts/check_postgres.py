@@ -1,9 +1,10 @@
+import os
 import asyncio
 import asyncpg
 from dotenv import load_dotenv
-import os
-
-load_dotenv("d:/react-website/aibios/backend/.env")
+current_dir = os.path.dirname(os.path.abspath(__file__))
+backend_dir = os.path.abspath(os.path.join(current_dir, "../backend"))
+load_dotenv(os.path.join(backend_dir, ".env"))
 
 async def run():
     # Load postgres connection string

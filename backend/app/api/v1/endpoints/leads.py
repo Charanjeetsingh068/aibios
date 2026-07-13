@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.endpoints.auth import PermissionChecker
 from app.core.audit import record_audit_log
-from app.core.database import get_db, mongo_db
+from app.core.database import get_db, mongo_db, is_mongo_online
 from app.core.realtime import emit_to_organization
 from app.models.auth import User
 from app.models.business import Lead
@@ -74,6 +74,9 @@ def _serialize(lead: Lead) -> Dict[str, Any]:
 
 async def _record_mongo_lead(lead: Lead, raw_payload: Optional[dict] = None) -> None:
     """Mirrors the lead into MongoDB per the spec's per-channel + all_leads collections."""
+    if not await is_mongo_online():
+        logger.debug("MongoDB is offline / not configured. Mirroring skipped.")
+        return
     try:
         doc = {**_serialize(lead), "raw_payload": raw_payload or {}}
         await asyncio.wait_for(
@@ -87,10 +90,13 @@ async def _record_mongo_lead(lead: Lead, raw_payload: Optional[dict] = None) -> 
                 timeout=1.5
             )
     except Exception as e:
-        logger.error(f"MongoDB mirroring skipped (offline/timeout): {e}")
+        logger.warning(f"MongoDB mirroring skipped (offline/timeout): {e}")
 
 
 async def _record_lead_event(lead_id: str, organization_id: str, event_type: str, note: str, actor_user_id: Optional[str] = None) -> None:
+    if not await is_mongo_online():
+        logger.debug("MongoDB is offline / not configured. Event logging skipped.")
+        return
     try:
         await asyncio.wait_for(
             mongo_db["lead_events"].insert_one({
@@ -104,7 +110,7 @@ async def _record_lead_event(lead_id: str, organization_id: str, event_type: str
             timeout=1.5
         )
     except Exception as e:
-        logger.error(f"MongoDB event logging skipped (offline/timeout): {e}")
+        logger.warning(f"MongoDB event logging skipped (offline/timeout): {e}")
 
 
 @router.get("", response_model=Dict[str, Any])
@@ -329,9 +335,13 @@ async def delete_lead(
     await db.delete(lead)
     await db.commit()
 
-    await mongo_db["all_leads"].delete_one({"_id": lead_id})
-    for collection in SOURCE_COLLECTIONS.values():
-        await mongo_db[collection].delete_one({"_id": lead_id})
+    if await is_mongo_online():
+        try:
+            await asyncio.wait_for(mongo_db["all_leads"].delete_one({"_id": lead_id}), timeout=1.5)
+            for collection in SOURCE_COLLECTIONS.values():
+                await asyncio.wait_for(mongo_db[collection].delete_one({"_id": lead_id}), timeout=1.5)
+        except Exception as e:
+            logger.warning(f"MongoDB delete failed: {e}")
 
     await emit_to_organization(current_user.organization_id, "lead:deleted", {"id": lead_id})
     return {"success": True}
@@ -348,6 +358,8 @@ async def get_lead_events(
         raise HTTPException(status_code=404, detail="Lead not found")
 
     events: List[Dict[str, Any]] = []
+    if not await is_mongo_online():
+        return {"events": events}
     try:
         cursor = mongo_db["lead_events"].find({"lead_id": lead_id}).sort("created_at", -1).limit(200)
         docs = await asyncio.wait_for(cursor.to_list(length=200), timeout=1.5)
@@ -360,7 +372,7 @@ async def get_lead_events(
                 "created_at": doc["created_at"].isoformat() if doc.get("created_at") else None,
             })
     except Exception as e:
-        logger.error(f"MongoDB lead events query skipped (offline/timeout): {e}")
+        logger.warning(f"MongoDB lead events query skipped (offline/timeout): {e}")
     return {"events": events}
 
 

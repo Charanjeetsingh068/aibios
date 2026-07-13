@@ -16,7 +16,7 @@ router = APIRouter()
 @router.post("/", response_model=TeamResponse)
 async def create_team(
     team_data: TeamCreate,
-    current_user: User = Depends(PermissionChecker("users:manage")),
+    current_user: User = Depends(PermissionChecker("users.write")),
     db: AsyncSession = Depends(get_db)
 ):
     team = Team(
@@ -42,7 +42,7 @@ async def create_team(
 
 @router.get("/", response_model=List[TeamResponse])
 async def list_teams(
-    current_user: User = Depends(PermissionChecker("users:read")),
+    current_user: User = Depends(PermissionChecker("users.read")),
     db: AsyncSession = Depends(get_db)
 ):
     result = await db.execute(select(Team).where(Team.organization_id == current_user.organization_id))
@@ -52,7 +52,7 @@ async def list_teams(
 async def update_team(
     team_id: str,
     team_data: TeamUpdate,
-    current_user: User = Depends(PermissionChecker("users:manage")),
+    current_user: User = Depends(PermissionChecker("users.write")),
     db: AsyncSession = Depends(get_db)
 ):
     result = await db.execute(select(Team).where(Team.id == team_id, Team.organization_id == current_user.organization_id))
@@ -81,7 +81,7 @@ async def update_team(
 async def add_team_member(
     team_id: str,
     member_data: TeamMemberBase,
-    current_user: User = Depends(PermissionChecker("users:manage")),
+    current_user: User = Depends(PermissionChecker("users.write")),
     db: AsyncSession = Depends(get_db)
 ):
     team_result = await db.execute(select(Team).where(Team.id == team_id, Team.organization_id == current_user.organization_id))

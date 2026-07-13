@@ -1,7 +1,7 @@
 import asyncio
 import sys
 
-sys.path.append('d:/react-website/aibios/backend')
+sys.path.append('c:/react/aibios/backend')
 
 from app.core.database import postgres_engine, Base
 from app.models import enterprise_integrations

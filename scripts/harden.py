@@ -1,7 +1,7 @@
 import os
 import re
 
-BACKEND_DIR = "d:/react-website/aibios/backend/app"
+BACKEND_DIR = "c:/react/aibios/backend/app"
 
 # 1. Create app/core/retry.py
 retry_content = """import asyncio

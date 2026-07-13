@@ -1,6 +1,6 @@
 import os
 
-filepath = "d:/react-website/aibios/frontend/src/app/page.tsx"
+filepath = "c:/react/aibios/frontend/src/app/page.tsx"
 with open(filepath, "r", encoding="utf-8") as f:
     content = f.read()
 

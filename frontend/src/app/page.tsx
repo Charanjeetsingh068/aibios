@@ -40,6 +40,8 @@ import { fetchInvoices, triggerCheckout as apiTriggerCheckout } from '../service
 
 import { RequirePermission } from '../components/RequirePermission';
 import { Modal } from '../components/Modal';
+import { useAuth } from '../contexts/AuthContext';
+import ProtectedLayout from '../layouts/ProtectedLayout';
 import { createRole as apiCreateRole, deleteRole as apiDeleteRole, assignPermission as apiAssignPermission } from '../services/roleService';
 import { inviteUser as apiInviteUser, deleteUser as apiDeleteUser, assignUserRole as apiAssignUserRole, createUser as apiCreateUser, forceUserPassword as apiForceUserPassword, updateUser as apiUpdateUser, suspendUser as apiSuspendUser, reactivateUser as apiReactivateUser, resetUserPassword as apiResetUserPassword } from '../services/userService';
 
@@ -51,54 +53,54 @@ const NAV_GROUPS = [
     label: 'Overview',
     items: [
       { id: 'dashboard', label: 'Dashboard', icon: Cpu },
-      { id: 'analytics', label: 'Analytics', icon: BarChart3 },
-      { id: 'reports', label: 'Reports', icon: FileText },
+      { id: 'analytics', label: 'Analytics', icon: BarChart3, permission: 'leads:read' },
+      { id: 'reports', label: 'Reports', icon: FileText, permission: 'leads:read' },
     ],
   },
   {
     label: 'CRM',
     items: [
-      { id: 'leads', label: 'Leads', icon: Target },
-      { id: 'pipeline', label: 'Sales Pipeline', icon: GitBranch },
-      { id: 'tasks', label: 'Tasks', icon: CheckSquare },
-      { id: 'meetings', label: 'Meetings', icon: Calendar },
+      { id: 'leads', label: 'Leads', icon: Target, permission: 'leads:read' },
+      { id: 'pipeline', label: 'Sales Pipeline', icon: GitBranch, permission: 'leads:read' },
+      { id: 'tasks', label: 'Tasks', icon: CheckSquare, permission: 'leads:read' },
+      { id: 'meetings', label: 'Meetings', icon: Calendar, permission: 'leads:read' },
     ],
   },
   {
     label: 'Channels',
     items: [
-      { id: 'campaigns', label: 'Campaigns', icon: Megaphone },
-      { id: 'facebook', label: 'Facebook', icon: Facebook },
-      { id: 'instagram', label: 'Instagram', icon: Instagram },
-      { id: 'whatsapp', label: 'WhatsApp', icon: MessageSquare },
-      { id: 'ai-voice', label: 'AI Voice', icon: PhoneCall },
+      { id: 'campaigns', label: 'Campaigns', icon: Megaphone, permission: 'leads:read' },
+      { id: 'facebook', label: 'Facebook', icon: Facebook, permission: 'leads:read' },
+      { id: 'instagram', label: 'Instagram', icon: Instagram, permission: 'leads:read' },
+      { id: 'whatsapp', label: 'WhatsApp', icon: MessageSquare, permission: 'leads:read' },
+      { id: 'ai-voice', label: 'AI Voice', icon: PhoneCall, permission: 'leads:read' },
     ],
   },
   {
     label: 'AI Platform',
     items: [
-      { id: 'ai-agents', label: 'AI Agents', icon: Bot },
-      { id: 'automation', label: 'Automation', icon: Zap },
-      { id: 'knowledge-base', label: 'Knowledge Base', icon: BookOpen },
-      { id: 'documents', label: 'Documents', icon: File },
+      { id: 'ai-agents', label: 'AI Agents', icon: Bot, permission: 'agents:read' },
+      { id: 'automation', label: 'Automation', icon: Zap, permission: 'agents:read' },
+      { id: 'knowledge-base', label: 'Knowledge Base', icon: BookOpen, permission: 'agents:read' },
+      { id: 'documents', label: 'Documents', icon: File, permission: 'agents:read' },
     ],
   },
   {
     label: 'Administration',
     items: [
-      { id: 'organizations', label: 'Organizations', icon: Building2 },
-      { id: 'users', label: 'Users', icon: Users },
-      { id: 'roles', label: 'Roles & Permissions', icon: Shield },
-      { id: 'billing', label: 'Billing', icon: CreditCard },
+      { id: 'organizations', label: 'Organizations', icon: Building2, permission: 'org:read' },
+      { id: 'users', label: 'Users', icon: Users, permission: 'org:read' },
+      { id: 'roles', label: 'Roles & Permissions', icon: Shield, permission: 'org:read' },
+      { id: 'billing', label: 'Billing', icon: CreditCard, permission: 'org:read' },
     ],
   },
   {
     label: 'System',
     items: [
-      { id: 'system-health', label: 'System Health', icon: Activity },
-      { id: 'audit-logs', label: 'Audit Logs', icon: ScrollText },
-      { id: 'developer', label: 'Developer', icon: Code },
-      { id: 'settings', label: 'Settings', icon: Settings },
+      { id: 'system-health', label: 'System Health', icon: Activity, permission: 'admin:all' },
+      { id: 'audit-logs', label: 'Audit Logs', icon: ScrollText, permission: 'admin:all' },
+      { id: 'developer', label: 'Developer', icon: Code, permission: 'admin:all' },
+      { id: 'settings', label: 'Settings', icon: Settings, permission: 'org:write' },
     ],
   },
 ];
@@ -182,7 +184,8 @@ export default function Dashboard() {
   const [isLoading, setIsLoading] = useState(true);
   const [isError, setIsError] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
-  const [userProfile, setUserProfile] = useState<any>(null);
+  const { user, logoutUser, workspaces, currentWorkspace, switchWorkspace, hasPermission } = useAuth();
+  const userProfile = user;
 
   // ── Dashboard metrics from new API ──
   const [metrics, setMetrics] = useState<DashboardMetrics | null>(null);
@@ -2596,7 +2599,8 @@ graph = workflow.compile()`}</pre>
 
   // ─── Main Return ──────────────────────────────────────────────────────────
   return (
-    <div className="dashboard-container">
+    <ProtectedLayout>
+      <div className="dashboard-container">
       {/* Enterprise Sidebar */}
       <aside className="sidebar sidebar-enterprise">
         <div className="logo-container">
@@ -2605,27 +2609,34 @@ graph = workflow.compile()`}</pre>
         </div>
 
         <nav className="enterprise-nav">
-          {NAV_GROUPS.map(group => (
-            <div key={group.label} className="nav-group">
-              <span className="nav-group-label">{group.label}</span>
-              <ul className="nav-list">
-                {group.items.map(item => {
-                  const IconComp = item.icon;
-                  return (
-                    <li key={item.id}>
-                      <button
-                        onClick={() => setActiveTab(item.id)}
-                        className={`nav-item-enterprise ${activeTab === item.id ? 'active' : ''}`}
-                      >
-                        <IconComp size={15} />
-                        {item.label}
-                      </button>
-                    </li>
-                  );
-                })}
-              </ul>
-            </div>
-          ))}
+          {NAV_GROUPS.map(group => {
+            const filteredItems = group.items.filter(item => {
+              if (!item.permission) return true;
+              return hasPermission(item.permission);
+            });
+            if (filteredItems.length === 0) return null;
+            return (
+              <div key={group.label} className="nav-group">
+                <span className="nav-group-label">{group.label}</span>
+                <ul className="nav-list">
+                  {filteredItems.map(item => {
+                    const IconComp = item.icon;
+                    return (
+                      <li key={item.id}>
+                        <button
+                          onClick={() => setActiveTab(item.id)}
+                          className={`nav-item-enterprise ${activeTab === item.id ? 'active' : ''}`}
+                        >
+                          <IconComp size={15} />
+                          {item.label}
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </div>
+            );
+          })}
         </nav>
 
         <div className="sidebar-footer">
@@ -2644,31 +2655,56 @@ graph = workflow.compile()`}</pre>
       {/* Main Panel */}
       <main className="main-content">
         {/* Header */}
-        <header className="header">
-          <div className="header-title-container">
-            <h2>AI-BOS Enterprise</h2>
-            <span className="header-subtitle">Phase 3 — {tabLabel}</span>
+        <header className="header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div className="header-title-container" style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-6)' }}>
+            <div>
+              <h2 style={{ margin: 0 }}>AI-BOS Enterprise</h2>
+              <span className="header-subtitle">Phase 3 — {tabLabel}</span>
+            </div>
+
+            {/* Workspace Selector */}
+            {workspaces && workspaces.length > 0 && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
+                <span style={{ fontSize: 'var(--font-xs)', color: 'var(--text-tertiary)', fontWeight: 500 }}>Active Workspace:</span>
+                <select
+                  value={currentWorkspace?.id || ''}
+                  onChange={(e) => switchWorkspace(e.target.value)}
+                  style={{
+                    padding: '6px 12px',
+                    borderRadius: 'var(--radius-xs)',
+                    border: '1px solid var(--border-color)',
+                    backgroundColor: 'var(--bg-tertiary)',
+                    color: 'var(--text-primary)',
+                    fontSize: 'var(--font-xs)',
+                    fontWeight: 600,
+                    outline: 'none',
+                    cursor: 'pointer',
+                    boxShadow: 'var(--shadow-sm)'
+                  }}
+                >
+                  {workspaces.map(ws => (
+                    <option key={ws.id} value={ws.id}>{ws.name}</option>
+                  ))}
+                </select>
+              </div>
+            )}
           </div>
 
           <div className="header-actions">
             <button onClick={toggleTheme} className="theme-toggle-btn" title="Toggle Theme" aria-label="Toggle Theme">
               {theme === 'dark' ? <Sun size={20} /> : <Moon size={20} />}
             </button>
-
+ 
             <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)' }}>
               <button
                 onClick={() => window.location.href = '/profile'}
-                title="Account Settings"
+                title={userProfile ? `Logged in as ${userProfile.first_name} ${userProfile.last_name} (${userProfile.email})` : 'Account Settings'}
                 style={{ width: 32, height: 32, borderRadius: '50%', background: 'var(--brand-light)', border: '2px solid var(--brand)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 'var(--font-xs)', fontWeight: 'bold', color: 'var(--brand)', cursor: 'pointer' }}
               >
-                {userProfile ? `${userProfile.first_name[0]}${userProfile.last_name[0]}` : 'U'}
+                {userProfile ? `${userProfile.first_name[0].toUpperCase()}${userProfile.last_name[0].toUpperCase()}` : 'U'}
               </button>
               <button
-                onClick={async () => {
-                  const { logout } = await import('../services/authService');
-                  await logout();
-                  window.location.href = '/auth/login';
-                }}
+                onClick={logoutUser}
                 style={{ fontSize: 'var(--font-xs)', color: 'var(--danger)', background: 'none', border: 'none', cursor: 'pointer', fontWeight: 'var(--weight-semibold)', display: 'flex', alignItems: 'center', gap: 4 }}
               >
                 <LogOut size={14} /> Sign Out
@@ -2960,7 +2996,16 @@ graph = workflow.compile()`}</pre>
           </button>
         </form>
       </Modal>
+      <div className="toast-container">
+        {toasts.map(t => (
+          <div key={t.id} className={`toast-item ${t.type}`}>
+            <span className="toast-item-text">{t.text}</span>
+            <button onClick={() => setToasts(prev => prev.filter(x => x.id !== t.id))} className="toast-close-btn">&times;</button>
+          </div>
+        ))}
+      </div>
 
     </div>
+    </ProtectedLayout>
   );
 }

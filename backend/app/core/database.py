@@ -34,7 +34,7 @@ AsyncSessionLocal = async_sessionmaker(
 # ------------------------------------------------------------------------------
 import os
 
-fallback_db_path = os.getenv("SQLITE_DB_PATH", "d:/react-website/aibios/database/postgres/fallback.db")
+fallback_db_path = os.getenv("SQLITE_DB_PATH", os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../database/postgres/fallback.db")))
 os.makedirs(os.path.dirname(fallback_db_path), exist_ok=True)
 
 sqlite_engine = create_async_engine(
@@ -285,14 +285,49 @@ async def verify_postgres() -> bool:
         logger.error(f"Database connection verification failed: {e}")
         return False
 
-async def verify_mongo() -> bool:
+_mongo_online = None
+_mongo_last_checked = 0.0
+
+async def is_mongo_online() -> bool:
+    global _mongo_online, _mongo_last_checked
+    now = time.monotonic()
+    if _mongo_online is not None and (now - _mongo_last_checked) < 30:
+        return _mongo_online
     try:
-        # Motor has built-in connection timeouts configured in the URL or client
-        await asyncio.wait_for(mongo_client.admin.command('ping'), timeout=2.0)
-        return True
-    except Exception as e:
-        logger.error(f"MongoDB connection verification failed: {e}")
-        return False
+        await asyncio.wait_for(mongo_client.admin.command('ping'), timeout=1.0)
+        if _mongo_online is not True and _mongo_online is not None:
+            logger.info("MongoDB connection established/restored.")
+        _mongo_online = True
+    except Exception:
+        if _mongo_online is not False and _mongo_online is not None:
+            logger.warning("MongoDB is offline / not configured.")
+        _mongo_online = False
+    _mongo_last_checked = now
+    return _mongo_online
+
+_qdrant_online = None
+_qdrant_last_checked = 0.0
+
+async def is_qdrant_online() -> bool:
+    global _qdrant_online, _qdrant_last_checked
+    now = time.monotonic()
+    if _qdrant_online is not None and (now - _qdrant_last_checked) < 30:
+        return _qdrant_online
+    try:
+        client = get_qdrant_client()
+        await asyncio.wait_for(asyncio.to_thread(client.get_collections), timeout=1.0)
+        if _qdrant_online is not True and _qdrant_online is not None:
+            logger.info("Qdrant connection established/restored.")
+        _qdrant_online = True
+    except Exception:
+        if _qdrant_online is not False and _qdrant_online is not None:
+            logger.warning("Qdrant is offline / not configured.")
+        _qdrant_online = False
+    _qdrant_last_checked = now
+    return _qdrant_online
+
+async def verify_mongo() -> bool:
+    return await is_mongo_online()
 
 async def verify_redis() -> bool:
     try:
@@ -303,13 +338,7 @@ async def verify_redis() -> bool:
         return False
 
 async def verify_qdrant() -> bool:
-    try:
-        client = get_qdrant_client()
-        await asyncio.wait_for(asyncio.to_thread(client.get_collections), timeout=2.0)
-        return True
-    except Exception as e:
-        logger.error(f"Qdrant connection verification failed: {e}")
-        return False
+    return await is_qdrant_online()
 
 # ------------------------------------------------------------------------------
 # 6. Database Seeding Routine
@@ -555,6 +584,9 @@ async def mongo_transaction():
 
 async def init_mongo_indexes():
     """Verifies and creates necessary production indexes for MongoDB collections."""
+    if not await is_mongo_online():
+        logger.info("MongoDB is not online/configured. Skipping index creation.")
+        return
     try:
         db = mongo_client.get_default_database()
         # Index audit logs on timestamp for retrieval performance
@@ -563,4 +595,4 @@ async def init_mongo_indexes():
         await db.chat_history.create_index([("session_id", 1), ("created_at", 1)])
         logger.info("MongoDB indexes verified successfully.")
     except Exception as e:
-        logger.error(f"Failed to verify/create MongoDB indexes: {e}")
+        logger.warning(f"Failed to verify/create MongoDB indexes: {e}")
