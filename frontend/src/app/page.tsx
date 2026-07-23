@@ -195,7 +195,8 @@ export default function Dashboard() {
   const [auditLogs, setAuditLogs] = useState<AuditLogEntry[]>([]);
 
   // ── Real-time notification feed (populated only by live socket events) ──
-const [notifications, setNotifications] = useState<LiveNotification[]>([]);
+  const [notifications, setNotifications] = useState<LiveNotification[]>([]);
+  const [toasts, setToasts] = useState<{ id: number; text: string; type: string }[]>([]);
   const [leadMappings, setLeadMappings] = useState<any[]>([]);
   const [showMappingModal, setShowMappingModal] = useState(false);
   const [newMappingFormId, setNewMappingFormId] = useState('');
@@ -203,6 +204,25 @@ const [notifications, setNotifications] = useState<LiveNotification[]>([]);
   const [newMappingCrmField, setNewMappingCrmField] = useState('');
   const pushNotification = (text: string) => {
     setNotifications(prev => [{ id: Date.now(), text, time: 'Just now', unread: true }, ...prev.slice(0, 19)]);
+    
+    // Auto-determine type for the toast
+    let type = 'info';
+    const lower = text.toLowerCase();
+    if (lower.includes('success') || lower.includes('created') || lower.includes('sent') || lower.includes('saved') || lower.includes('updated')) {
+      type = 'success';
+    } else if (lower.includes('failed') || lower.includes('error') || lower.includes('cannot') || lower.includes('must be')) {
+      type = 'error';
+    } else if (lower.includes('warning') || lower.includes('delete')) {
+      type = 'warning';
+    }
+    
+    const id = Date.now();
+    setToasts(prev => [...prev, { id, text, type }]);
+    
+    // Auto-remove toast after 4 seconds
+    setTimeout(() => {
+      setToasts(prev => prev.filter(t => t.id !== id));
+    }, 4000);
   };
 
   // ── Leads filter ──
@@ -531,19 +551,7 @@ const [notifications, setNotifications] = useState<LiveNotification[]>([]);
     'deal:deleted': () => { invalidate('deals'); invalidate('overview'); },
   });
 
-  // ─── Auth check + profile load ─────────────────────────────────────────────
-  useEffect(() => {
-    const token = localStorage.getItem('aibos_access_token');
-    if (!token) {
-      window.location.href = '/auth/login';
-      return;
-    }
-    import('../services/authService').then(({ getMe }) => {
-      getMe().then(profile => setUserProfile(profile)).catch(() => {
-        window.location.href = '/auth/login';
-      });
-    });
-  }, []);
+
 
   // ─── Theme init ───────────────────────────────────────────────────────────
   useEffect(() => {
